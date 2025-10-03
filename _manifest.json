@@ -1,0 +1,45 @@
+{
+  "manifest_version": 1,
+  "name": "光遇查询插件",
+  "version": "1.0.1",
+  "description": "光遇工具(sky_tools_plugin)",
+  "author": {
+    "name": "寻",
+    "url": "https://github.com/xc94188"
+  },
+  "license": "MIT",
+  "host_application": {
+    "min_version": "0.10.2"
+  },
+  "homepage_url": "https://github.com/xc94188",
+  "repository_url": "https://github.com/xc94188",
+  "keywords": ["光遇", "身高查询", "任务图片", "游戏工具", "Sky光遇"],
+  "categories": ["Utility Tools"],
+  "default_locale": "zh-CN",
+  "plugin_info": {
+    "is_built_in": false,
+    "plugin_type": "general",
+    "components": [
+      {
+        "type": "command",
+        "name": "skytools",
+        "description": "帮助命令"
+      },
+      {
+        "type": "command",
+        "name": "height",
+        "description": "身高查询命令"
+      },
+      {
+        "type": "command",
+        "name": "task",
+        "description": "任务图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "大蜡",
+        "description": "大蜡烛位置图片获取命令"
+      }
+    ]
+  }
+}
