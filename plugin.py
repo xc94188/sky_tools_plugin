@@ -590,7 +590,7 @@ class SkyToolsPlugin(BasePlugin):
             "key": ConfigField(
                 type=str, 
                 default="你的身高API密钥", 
-                description="身高查询API密钥，需要从 https://mangotool.cn/openAPI 获取",
+                description="身高查询API密钥，获取方式：芒果工具： https://mangotool.cn/openAPI",
                 required=True
             ),
             "timeout": ConfigField(
@@ -603,12 +603,12 @@ class SkyToolsPlugin(BasePlugin):
             "url": ConfigField(
                 type=str, 
                 default="https://api.t1qq.com/api/sky/sc/scrw", 
-                description="任务图片API地址"
+                description="任务图片API地址，应天API：https://api.t1qq.com/api/sky/sc/scrw，独角兽API：https://ovoav.com/api/sky/rwtp/rwt"
             ),
             "key": ConfigField(
                 type=str, 
                 default="你的任务API密钥", 
-                description="任务图片API密钥，需要从 https://api.t1qq.com/doc/11 获取",
+                description="任务图片API密钥，获取方式：应天API：https://api.t1qq.com，独角兽API：https://ovoav.com",
                 required=True
             ),
             "timeout": ConfigField(
@@ -621,12 +621,12 @@ class SkyToolsPlugin(BasePlugin):
             "url": ConfigField(
                 type=str, 
                 default="https://api.t1qq.com/api/sky/sc/scdl", 
-                description="大蜡烛位置API地址"
+                description="大蜡烛位置API地址，应天API：https://api.t1qq.com/api/sky/sc/scdl，独角兽API：https://ovoav.com/api/sky/dlzwz/dl"
             ),
             "key": ConfigField(
                 type=str, 
                 default="你的大蜡烛API密钥", 
-                description="大蜡烛位置API密钥，需要从 https://api.t1qq.com/doc/14 获取",
+                description="大蜡烛位置API密钥，获取方式：应天API：https://api.t1qq.com，独角兽API：https://ovoav.com",
                 required=True
             ),
             "timeout": ConfigField(
