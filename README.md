@@ -37,4 +37,4 @@ sky_tools_plugin（麦麦光遇工具）插件v1.0.1，让你的麦麦为你的�
 - 请在插件配置文件中设置相应的API密钥
 
 测身高示例：
-![测身高示例](./img/heigth.png)
+![测身高示例](./img/height.png)
