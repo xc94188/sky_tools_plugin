@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "name": "光遇查询插件",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "光遇工具(sky_tools_plugin)",
   "author": {
     "name": "寻",
@@ -37,8 +37,33 @@
       },
       {
         "type": "command",
-        "name": "大蜡",
+        "name": "candle",
         "description": "大蜡烛位置图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "ancestor",
+        "description": "复刻先祖信息获取命令"
+      },
+      {
+        "type": "command",
+        "name": "magic",
+        "description": "每日魔法图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "season_candle",
+        "description": "每日季蜡位置图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "calendar",
+        "description": "光遇日历图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "redstone",
+        "description": "红石位置图片获取命令"
       }
     ]
   }
