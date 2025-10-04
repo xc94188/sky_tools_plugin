@@ -44,7 +44,7 @@ class HelpCommand(BaseCommand):
    → 获取大蜡烛位置图片
 
 👴 /ancestor 或 /fk 或 /复刻 或 /复刻先祖
-   → 获取复刻先祖位置图片
+   → 获取复刻先祖位置
 
 🔮 /magic 或 /mf 或 /魔法 或 /每日魔法
    → 获取每日魔法图片
