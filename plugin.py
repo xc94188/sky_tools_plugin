@@ -4,6 +4,7 @@ import asyncio
 import re
 import base64
 import time
+import json
 from src.plugin_system import (
     BasePlugin,
     register_plugin,
@@ -12,6 +13,8 @@ from src.plugin_system import (
     ConfigField,
     get_logger
 )
+from src.plugin_system.apis import plugin_manage_api
+import os
 
 logger = get_logger('sky_tools_plugin')
 
@@ -30,52 +33,97 @@ class HelpCommand(BaseCommand):
     
     def _get_help_text(self) -> str:
         """生成帮助文本"""
-        return """✨ 光遇工具插件使用说明 ✨
-
-📋 可用命令:
-
-📏 /height <游戏长ID> [好友码]
-   → 查询光遇角色身高数据
-
-🖼️ /task 或 /rw 或 /任务 或 /每日任务
-   → 获取每日任务图片
-
-🕯️ /candle 或 /dl 或 /大蜡 或 /大蜡烛
-   → 获取大蜡烛位置图片
-
-👴 /ancestor 或 /fk 或 /复刻 或 /复刻先祖
-   → 获取复刻先祖位置
-
-🔮 /magic 或 /mf 或 /魔法 或 /每日魔法
-   → 获取每日魔法图片
-
-🕯️ /scandel 或 /jl 或 /季蜡 或 /季节蜡烛 或 /季蜡位置
-   → 获取每日季蜡位置图片
-
-📅 /calendar 或 /rl 或 /日历 或 /活动日历
-   → 获取光遇日历图片
-
-🔴 /redstone 或 /hs 或 /红石 或 /红石位置
-   → 获取红石位置图片
-
-ℹ️ /skytools
-   → 显示本帮助信息
-
-🔧 配置说明:
-• 功能需前往对应平台获取API密钥
-• 请在插件配置文件中设置相应的API密钥
-
-💡 获取游戏长ID:
-游戏内右上角设置→精灵→询问"长id"
-
-如有问题请检查插件配置或联系管理员"""
+        # 检查各个功能是否启用
+        height_enabled = self.get_config("settings.enable_height_query", True)
+        task_enabled = self.get_config("settings.enable_task_query", True)
+        candle_enabled = self.get_config("settings.enable_candle_query", True)
+        ancestor_enabled = self.get_config("settings.enable_ancestor_query", True)
+        magic_enabled = self.get_config("settings.enable_magic_query", True)
+        season_candle_enabled = self.get_config("settings.enable_season_candle_query", True)
+        calendar_enabled = self.get_config("settings.enable_calendar_query", True)
+        redstone_enabled = self.get_config("settings.enable_redstone_query", True)
+        skytest_enabled = self.get_config("settings.enable_skytest_query", True)
+        
+        help_lines = ["✨ 光遇工具插件使用说明 ✨", "", "📋 可用命令:"]
+        
+        if height_enabled:
+            help_lines.extend([
+                "📏 /height <游戏长ID> [好友码]",
+                "   → 查询光遇角色身高数据",
+                ""
+            ])
+        
+        if task_enabled:
+            help_lines.extend([
+                "🖼️ /task 或 /rw 或 /任务 或 /每日任务",
+                "   → 获取每日任务图片",
+                ""
+            ])
+        
+        if candle_enabled:
+            help_lines.extend([
+                "🕯️ /candle 或 /dl 或 /大蜡 或 /大蜡烛",
+                "   → 获取大蜡烛位置图片",
+                ""
+            ])
+        
+        if ancestor_enabled:
+            help_lines.extend([
+                "👴 /ancestor 或 /fk 或 /复刻 或 /复刻先祖",
+                "   → 获取复刻先祖位置",
+                ""
+            ])
+        
+        if magic_enabled:
+            help_lines.extend([
+                "🔮 /magic 或 /mf 或 /魔法 或 /每日魔法",
+                "   → 获取每日魔法图片",
+                ""
+            ])
+        
+        if season_candle_enabled:
+            help_lines.extend([
+                "🕯️ /scandel 或 /jl 或 /季蜡 或 /季节蜡烛 或 /季蜡位置",
+                "   → 获取每日季蜡位置图片",
+                ""
+            ])
+        
+        if calendar_enabled:
+            help_lines.extend([
+                "📅 /calendar 或 /rl 或 /日历 或 /活动日历",
+                "   → 获取光遇日历图片",
+                ""
+            ])
+        
+        if redstone_enabled:
+            help_lines.extend([
+                "🔴 /redstone 或 /hs 或 /红石 或 /红石位置",
+                "   → 获取红石位置图片",
+                ""
+            ])
+        
+        if skytest_enabled:
+            help_lines.extend([
+                "🔍 /skytest",
+                "   → 查看光遇服务器状态(是否炸服)",
+                ""
+            ])
+        
+        help_lines.extend([
+            "ℹ️ /skytools",
+            "   → 显示本帮助信息",
+            "",
+            "💡 提示: 部分功能可能已被管理员禁用"
+        ])
+        
+        return "\n".join(help_lines)
 
 class HeightQueryCommand(BaseCommand):
     """光遇身高查询命令"""
     
     command_name = "height"
     command_description = "查询光遇国服玩家身高数据"
-    command_pattern = r"^/height(?:\s+(?P<game_id>[^\s]+)(?:\s+(?P<friend_code>[^\s]+))?)?$"
+    command_pattern = r"^/height(?:\s+(?P<platform>\w+))?(?:\s+(?P<game_id>[^\s]+)(?:\s+(?P<friend_code>[^\s]+))?)?$"
     
     # 身高类型分类
     HEIGHT_TYPES = {
@@ -86,10 +134,15 @@ class HeightQueryCommand(BaseCommand):
         "very_tall": "非常高"
     }
     
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.platform_manager = PlatformManager(self)
+    
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行身高查询命令"""
         try:
             # 获取匹配的参数
+            platform = self.matched_groups.get("platform")
             game_id = self.matched_groups.get("game_id")
             friend_code = self.matched_groups.get("friend_code")
             
@@ -99,27 +152,39 @@ class HeightQueryCommand(BaseCommand):
                 await self.send_text(help_text)
                 return True, "显示帮助信息", True
             
-            # 验证游戏ID格式 (UUID格式)
-            if not self._validate_game_id(game_id):
-                await self.send_text("❌ 游戏ID格式错误")
-                return False, "游戏ID格式错误", True
+            # 检查是否有启用的平台
+            enabled_platforms = self.platform_manager.get_enabled_platforms()
+            if not enabled_platforms:
+                await self.send_text("❌ 所有身高查询平台都未启用，请联系管理员启用")
+                return False, "所有平台未启用", True
             
-            # 验证好友码格式 (可选)
-            if friend_code and not self._validate_friend_code(friend_code):
-                await self.send_text("❌ 好友码格式错误")
-                return False, "好友码格式错误", True
+            # 解析平台
+            query_platform = self.platform_manager.resolve_platform(platform)
+            if not query_platform:
+                await self.send_text("❌ 平台名称错误或该平台未启用")
+                return False, "平台错误或禁用", True
             
-            # 获取配置
-            api_url = self.get_config("height_api.url")
-            api_key = self.get_config("height_api.key")
-            timeout = self.get_config("height_api.timeout")
+            # 验证参数格式
+            validation_result = self._validate_parameters(query_platform, game_id, friend_code)
+            if not validation_result["success"]:
+                await self.send_text(validation_result["message"])
+                return False, validation_result["error"], True
             
-            if not api_key or api_key == "你的身高API密钥":
-                await self.send_text("❌ 插件未配置身高API密钥")
-                return False, "身高API密钥未配置", True
+            # 获取平台配置
+            platform_config = self._get_platform_config(query_platform)
+            if not platform_config:
+                await self.send_text(f"❌ 插件未配置{query_platform}平台API密钥")
+                return False, f"{query_platform}平台API密钥未配置", True
             
-            # 调用API查询身高数据
-            result = await self._query_height_api(api_url, api_key, game_id, friend_code, timeout)
+            # 调用平台处理器
+            platform_handler = self._get_platform_handler(query_platform)
+            result = await platform_handler.query(
+                platform_config["url"],
+                platform_config["key"],
+                game_id,
+                friend_code,
+                platform_config["timeout"]
+            )
             
             if result["success"]:
                 await self.send_text(result["message"])
@@ -135,6 +200,58 @@ class HeightQueryCommand(BaseCommand):
             await self.send_text(f"❌ 查询错误: {str(e)}")
             return False, f"查询错误: {str(e)}", True
     
+    def _validate_parameters(self, platform: str, game_id: str, friend_code: Optional[str]) -> Dict[str, Any]:
+        """验证参数格式"""
+        # 芒果平台：必须提供游戏长ID，好友码可选
+        if platform == "mango":
+            if not game_id or not self._validate_game_id(game_id):
+                return {
+                    "success": False,
+                    "message": "❌ 游戏ID格式错误",
+                    "error": "游戏ID格式错误"
+                }
+            if friend_code and not self._validate_friend_code(friend_code):
+                return {
+                    "success": False,
+                    "message": "❌ 好友码格式错误",
+                    "error": "好友码格式错误"
+                }
+            return {"success": True}
+        
+        # 独角兽和应天平台：游戏长ID或好友码任选其一
+        elif platform in ["ovoav", "yingtian"]:
+            # 检查第一个参数（game_id）是否为有效的游戏长ID
+            is_valid_game_id = self._validate_game_id(game_id)
+            
+            # 如果不是游戏长ID，检查是否为好友码
+            if not is_valid_game_id:
+                is_valid_friend_code = self._validate_friend_code(game_id)
+                if is_valid_friend_code:
+                    # 第一个参数是好友码，将参数重新分配
+                    friend_code = game_id.upper()  # 转换为大写
+                    game_id = None
+                else:
+                    # 既不是游戏长ID也不是好友码
+                    return {
+                        "success": False,
+                        "message": "❌ 需要提供有效的游戏长ID或好友码",
+                        "error": "缺少有效参数"
+                    }
+            
+            # 如果提供了额外的friend_code参数，验证其格式并转换为大写
+            if friend_code:
+                if not self._validate_friend_code(friend_code):
+                    return {
+                        "success": False,
+                        "message": "❌ 好友码格式错误",
+                        "error": "好友码格式错误"
+                    }
+                friend_code = friend_code.upper()  # 转换为大写
+            
+            return {"success": True}
+        
+        return {"success": True}
+    
     @staticmethod
     def _validate_game_id(game_id: str) -> bool:
         """验证游戏ID格式 (UUID格式)"""
@@ -149,92 +266,309 @@ class HeightQueryCommand(BaseCommand):
     
     def _get_help_text(self) -> str:
         """获取帮助文本"""
-        return """📏 身高查询使用说明
+        platforms_info = self.platform_manager.get_platforms_info()
+        enabled_platforms = self.platform_manager.get_enabled_platforms()
+        default_platform = self.get_config("height_api.default_platform", "获取失败")
+        
+        help_text = [
+            "📏 身高查询使用说明",
+            "",
+            "使用方法（两种格式）:",
+            "",
+            f"1. 使用默认平台(当前默认:{default_platform}):",
+            "   /height <游戏长ID> [好友码]",
+            "",
+            "2. 指定平台:",
+            "   /height <平台名> <游戏长ID> [好友码]",
+            "",
+            "参数说明:",
+            "• 平台名: 支持以下平台和别名",
+        ]
+        
+        for platform_info in platforms_info.values():
+            help_text.append(f"  • {platform_info}")
+        
+        help_text.extend([
+            "• 游戏长ID: UUID格式的游戏ID",
+            "• 好友码: 可选的好友码参数",
+            "",
+            "平台要求:",
+        ])
+        
+        # 只显示启用的平台要求
+        if "mango" in enabled_platforms:
+            help_text.append("• 芒果平台: 必须提供游戏长ID，好友码可选(若提供好友码,长id也要一并提供)")
+        if "ovoav" in enabled_platforms:
+            help_text.append("• 独角兽平台: 提供游戏长ID或好友码任选其一")
+        if "yingtian" in enabled_platforms:
+            help_text.append("• 应天平台: 必须提供游戏长ID，好友码可选(若提供好友码,长id也要一并提供)")
+        
+        help_text.extend([
+            "",
+            "获取方式:",
+            "• 长ID: 游戏右上角设置→精灵→询问'长id'",
+            "• 好友码: 游戏右上角设置→好友→使用编号→设置昵称后获取",
+            "",
+            "示例:",
+        ])
+        
+        # 只显示启用的平台示例
+        if "mango" in enabled_platforms:
+            help_text.extend([
+                "芒果平台:",
+                "/height mango xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+                "/height mg xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx XXXX-XXXX-XXXX"
+                ""
+            ])
+        
+        if "ovoav" in enabled_platforms:
+            help_text.extend([
+                "独角兽平台:",
+                "/height ovoav xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+                "/height djs XXXX-XXXX-XXXX",
+                ""
+            ])
+        
+        if "yingtian" in enabled_platforms:
+            help_text.extend([
+                "应天平台:",
+                "/height yingtian xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+                "/height yt xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx XXXX-XXXX-XXXX",
+                ""
+            ])
+        
+        help_text.extend([
+            "注意:",
+            "• 首次查询请提供好友码",
+            "• 请勿拉黑测身高好友，否则后续无法查询"
+        ])
+        
+        return "\n".join(help_text)
+    
+    def _get_platform_config(self, platform: str) -> Optional[Dict[str, Any]]:
+        """获取平台配置"""
+        if not self.platform_manager.is_platform_enabled(platform):
+            return None
+            
+        url = self.get_config(f"height_api.{platform}_url")
+        key = self.get_config(f"height_api.{platform}_key")
+        timeout = self.get_config("height_api.timeout", 15)
+        
+        if not key or key.startswith("你的"):
+            return None
+        
+        return {
+            "url": url,
+            "key": key,
+            "timeout": timeout
+        }
+    
+    def _get_platform_handler(self, platform: str):
+        """获取平台处理器"""
+        handlers = {
+            "mango": MangoPlatformHandler(self.HEIGHT_TYPES),
+            "ovoav": OvoavPlatformHandler(),
+            "yingtian": YingtianPlatformHandler(self.HEIGHT_TYPES)
+        }
+        return handlers.get(platform)
 
-使用方法:
-/height <游戏长ID> [好友码]
 
-参数说明:
-• 游戏长ID: UUID格式的游戏ID
-• 好友码: 可选的好友码参数
+class PlatformManager:
+    """平台管理器"""
+    
+    def __init__(self, command_instance):
+        self.command = command_instance
+        self.platforms = self._parse_platform_choices()
+    
+    def _parse_platform_choices(self) -> Dict[str, List[str]]:
+        """解析平台选择配置"""
+        choices_config = self.command.get_config("height_api.platform_aliases", 
+                                               ["mango:mg,芒果", "ovoav:独角兽,djs", "yingtian:应天,yt"])
+        
+        platforms = {}
+        for choice in choices_config:
+            if ":" in choice:
+                main_name, aliases = choice.split(":", 1)
+                aliases_list = [alias.strip() for alias in aliases.split(",")]
+                platforms[main_name] = [main_name] + aliases_list
+            else:
+                platforms[choice] = [choice]
+        
+        return platforms
+    
+    def resolve_platform(self, platform_input: Optional[str]) -> Optional[str]:
+        """解析平台输入"""
+        if not platform_input:
+            # 使用默认平台
+            default_platform = self.command.get_config("height_api.default_platform", "mango")
+            if self.is_platform_enabled(default_platform):
+                return default_platform
+            return self._get_first_enabled_platform()
+        
+        platform_input = platform_input.lower()
+        
+        for main_name, aliases in self.platforms.items():
+            if platform_input in aliases and self.is_platform_enabled(main_name):
+                return main_name
+        
+        return None
+    
+    def is_platform_enabled(self, platform: str) -> bool:
+        """检查平台是否启用"""
+        return self.command.get_config(f"height_api.enable_{platform}", True)
+    
+    def _get_first_enabled_platform(self) -> Optional[str]:
+        """获取第一个启用的平台"""
+        for platform in self.platforms.keys():
+            if self.is_platform_enabled(platform):
+                return platform
+        return None
+    
+    def get_platforms_info(self) -> Dict[str, str]:
+        """获取平台信息"""
+        info = {}
+        for main_name, aliases in self.platforms.items():
+            aliases_str = ", ".join(aliases[1:]) if len(aliases) > 1 else "无别名"
+            enabled = self.is_platform_enabled(main_name)
+            status = "✅ 启用" if enabled else "❌ 禁用"
+            info[main_name] = f"{main_name} (别名: {aliases_str}) - {status}"
+        return info
+    
+    def get_enabled_platforms(self) -> List[str]:
+        """获取所有启用的平台"""
+        return [platform for platform in self.platforms.keys() if self.is_platform_enabled(platform)]
 
-获取方式:
-• 长ID: 游戏右上角设置→精灵→询问"长id"
-• 好友码: 游戏右上角设置→好友→使用编号→设置昵称后获取
+class BasePlatformHandler:
+    """平台处理器基类"""
+    
+    async def query(self, url: str, key: str, game_id: str, friend_code: Optional[str], timeout: int) -> Dict[str, Any]:
+        """查询身高数据"""
+        raise NotImplementedError
 
-示例:
-/height xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-/height xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx XXXX-XXXX-XXXX"""
 
-    async def _query_height_api(self, url: str, key: str, game_id: str, 
-                              friend_code: Optional[str], timeout: int) -> Dict[str, Any]:
-        """调用身高查询API"""
+class MangoPlatformHandler(BasePlatformHandler):
+    """芒果平台处理器"""
+    
+    def __init__(self, height_types):
+        self.height_types = height_types
+    
+    async def query(self, url: str, key: str, game_id: str, friend_code: Optional[str], timeout: int) -> Dict[str, Any]:
+        """芒果平台查询"""
         params = {
             "key": key,
             "id": game_id.lower()
         }
-        
+        # 好友码是可选的，有就加上
         if friend_code:
             params["inviteCode"] = friend_code.upper()
         
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(url, json=params, timeout=timeout) as response:
-                    if response.status != 200:
-                        error_detail = await self._parse_error_response(response)
-                        if "用户数据已过期" in error_detail:
-                            return {
-                                "success": False,
-                                "message": "❌ 用户数据已过期",
-                                "error": f"HTTP {response.status}: {error_detail}"
-                            }
-                        return {
-                            "success": False,
-                            "message": f"❌ API请求失败: {error_detail}",
-                            "error": f"HTTP {response.status}: {error_detail}"
-                        }
-                    
-                    try:
-                        data = await response.json()
-                    except Exception as e:
-                        return {
-                            "success": False,
-                            "message": f"❌ 解析响应失败: {str(e)}",
-                            "error": f"解析错误: {str(e)}"
-                        }
-                    
-                    if "data" not in data or not data["data"]:
-                        error_msg = data.get("message", "未知错误")
-                        return {
-                            "success": False,
-                            "message": f"❌ API返回错误: {error_msg}",
-                            "error": error_msg
-                        }
-                    
-                    formatted_result = self._format_height_data(data["data"])
-                    return {
-                        "success": True,
-                        "message": formatted_result
-                    }
-                    
-            except aiohttp.ClientError as e:
-                return {
-                    "success": False,
-                    "message": f"❌ 网络请求错误: {str(e)}",
-                    "error": f"网络错误: {str(e)}"
-                }
-            except asyncio.TimeoutError:
-                return {
-                    "success": False,
-                    "message": "❌ 请求超时",
-                    "error": "请求超时"
-                }
+                    return await self._handle_response(response)
             except Exception as e:
+                return self._handle_error(e)
+    
+    async def _handle_response(self, response) -> Dict[str, Any]:
+        """处理响应"""
+        if response.status != 200:
+            error_detail = await self._parse_error_response(response)
+            if "用户数据已过期" in error_detail:
                 return {
                     "success": False,
-                    "message": f"❌ 请求错误: {str(e)}",
-                    "error": f"未知错误: {str(e)}"
+                    "message": "❌ 用户数据已过期",
+                    "error": f"HTTP {response.status}: {error_detail}"
                 }
+            return {
+                "success": False,
+                "message": f"❌ API请求失败: {error_detail}",
+                "error": f"HTTP {response.status}: {error_detail}"
+            }
+        
+        try:
+            data = await response.json()
+            if "data" not in data or not data["data"]:
+                error_msg = data.get("message", "未知错误")
+                return {
+                    "success": False,
+                    "message": f"❌ API返回错误: {error_msg}",
+                    "error": error_msg
+                }
+            
+            formatted_result = self._format_data(data["data"])
+            return {
+                "success": True,
+                "message": formatted_result
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"❌ 解析响应失败: {str(e)}",
+                "error": f"解析错误: {str(e)}"
+            }
+    
+    def _format_data(self, data: Dict[str, Any]) -> str:
+        """格式化数据"""
+        try:
+            s_value = self._safe_float(data.get("s"))
+            h_value = self._safe_float(data.get("h"))
+            height_value = self._safe_float(data.get("height"), h_value)
+            max_height = self._safe_float(data.get("max"), 1.0)
+            min_height = self._safe_float(data.get("min"), 14.0)
+            
+            height_type = self._calculate_height_type(height_value, min_height, max_height)
+            to_min_diff = max(0, min_height - height_value) if height_value is not None and min_height is not None else 0
+            to_max_diff = max(0, height_value - max_height) if height_value is not None and max_height is not None else 0
+            
+            result = [
+                "✨ 芒果平台 - 身高查询结果",
+                "━━━━━━━━━━━━━━━━━━━━",
+                f"📊 体型值(s值): {s_value:.8f}" if s_value is not None else "📊 体型值(s值): 未知",
+                f"📊 身高值(h值): {h_value:.8f}" if h_value is not None else "📊 身高值(h值): 未知",
+                f"📈 最高身高: {max_height:.8f}" if max_height is not None else "📈 最高身高: 未知",
+                f"📉 最矮身高: {min_height:.8f}" if min_height is not None else "📉 最矮身高: 未知",
+                f"✨ 当前身高: {height_value:.8f}" if height_value is not None else "✨ 当前身高: 未知",
+                f"🏷️ 身高类型: {height_type}",
+                "",
+                f"🎯 距离最矮: {to_min_diff:.8f}" if to_min_diff > 0 else "🎯 已达到最矮身高",
+                f"🎯 距离最高: {to_max_diff:.8f}" if to_max_diff > 0 else "🎯 已达到最高身高",
+                "━━━━━━━━━━━━━━━━━━━━"
+            ]
+            
+            return "\n".join(result)
+        except Exception as e:
+            return f"❌ 解析芒果平台数据失败: {str(e)}"
+    
+    def _safe_float(self, value, default=None):
+        """安全转换浮点数"""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    
+    def _calculate_height_type(self, h_value: float, min_height: float, max_height: float) -> str:
+        """计算身高类型"""
+        if h_value is None or min_height is None or max_height is None:
+            return "未知"
+        
+        height_range = min_height - max_height
+        if height_range <= 0:
+            return self.height_types["medium"]
+        
+        position = (h_value - max_height) / height_range
+        
+        if position < 0.2:
+            return self.height_types["very_tall"]
+        elif position < 0.4:
+            return self.height_types["tall"]
+        elif position < 0.6:
+            return self.height_types["medium"]
+        elif position < 0.8:
+            return self.height_types["short"]
+        else:
+            return self.height_types["very_short"]
     
     async def _parse_error_response(self, response) -> str:
         """解析错误响应"""
@@ -249,40 +583,260 @@ class HeightQueryCommand(BaseCommand):
             except:
                 return f"状态码: {response.status}"
     
-    def _format_height_data(self, data: Dict[str, Any]) -> str:
-        """格式化身高数据"""
+    def _handle_error(self, error) -> Dict[str, Any]:
+        """处理错误"""
+        if isinstance(error, aiohttp.ClientError):
+            return {
+                "success": False,
+                "message": f"❌ 网络请求错误: {str(error)}",
+                "error": f"网络错误: {str(error)}"
+            }
+        elif isinstance(error, asyncio.TimeoutError):
+            return {
+                "success": False,
+                "message": "❌ 请求超时",
+                "error": "请求超时"
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"❌ 请求错误: {str(error)}",
+                "error": f"未知错误: {str(error)}"
+            }
+
+
+class OvoavPlatformHandler(BasePlatformHandler):
+    """独角兽平台处理器"""
+    
+    async def query(self, url: str, key: str, game_id: str, friend_code: Optional[str], timeout: int) -> Dict[str, Any]:
+        """独角兽平台查询"""
+        params = {"key": key}
+        if game_id and not self._validate_game_id(game_id) and self._validate_friend_code(game_id):
+            params["id"] = game_id.upper()
+        elif game_id and self._validate_game_id(game_id):
+            params["id"] = game_id.lower()
+        elif friend_code and self._validate_friend_code(friend_code):
+            params["id"] = friend_code.upper()
+        else:
+            return {
+                "success": False,
+                "message": "❌ 请提供有效的游戏长ID或好友码",
+                "error": "缺少有效参数"
+            }
+        
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    return await self._handle_response(response)
+            except Exception as e:
+                return self._handle_error(e)
+    
+    async def _handle_response(self, response) -> Dict[str, Any]:
+        """处理响应"""
+        if response.status != 200:
+            error_detail = await self._parse_error_response(response)
+            return {
+                "success": False,
+                "message": f"❌ API请求失败: {error_detail}",
+                "error": f"HTTP {response.status}: {error_detail}"
+            }
+        
         try:
-            s_value = self._safe_float(data.get("s"))
-            h_value = self._safe_float(data.get("h"))
-            height_value = self._safe_float(data.get("height"), h_value)
-            max_height = self._safe_float(data.get("max"), 1.0)
-            min_height = self._safe_float(data.get("min"), 14.0)
+            response_text = await response.text()
+            cleaned_text = self._clean_html_response(response_text)
+            return {
+                "success": True,
+                "message": cleaned_text
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"❌ 解析响应失败: {str(e)}",
+                "error": f"解析错误: {str(e)}"
+            }
+    
+    def _clean_html_response(self, html_text: str) -> str:
+        """清理HTML响应"""
+        cleaned = re.sub(r'<[^>]+>', '', html_text)
+        cleaned = re.sub(r'[ ]+', ' ', cleaned)
+        return cleaned.strip()
+    
+    @staticmethod
+    def _validate_game_id(game_id: str) -> bool:
+        """验证游戏ID格式"""
+        uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        return re.match(uuid_pattern, game_id.lower()) is not None
+    
+    @staticmethod
+    def _validate_friend_code(friend_code: str) -> bool:
+        """验证好友码格式"""
+        friend_code_pattern = r"^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$"
+        return re.match(friend_code_pattern, friend_code.upper()) is not None
+    
+    async def _parse_error_response(self, response) -> str:
+        """解析错误响应"""
+        try:
+            return await response.text()
+        except:
+            return f"状态码: {response.status}"
+    
+    def _handle_error(self, error) -> Dict[str, Any]:
+        """处理错误"""
+        if isinstance(error, aiohttp.ClientError):
+            return {
+                "success": False,
+                "message": f"❌ 网络请求错误: {str(error)}",
+                "error": f"网络错误: {str(error)}"
+            }
+        elif isinstance(error, asyncio.TimeoutError):
+            return {
+                "success": False,
+                "message": "❌ 请求超时",
+                "error": "请求超时"
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"❌ 请求错误: {str(error)}",
+                "error": f"未知错误: {str(error)}"
+            }
+
+
+class YingtianPlatformHandler(BasePlatformHandler):
+    """应天平台处理器"""
+    
+    def __init__(self, height_types):
+        self.height_types = height_types
+    
+    async def query(self, url: str, key: str, game_id: str, friend_code: Optional[str], timeout: int) -> Dict[str, Any]:
+        """应天平台查询"""
+        params = {"key": key}
+        
+        # 必须提供游戏长ID
+        if not game_id or not self._validate_game_id(game_id):
+            return {
+                "success": False,
+                "message": "❌ 请提供有效的游戏长ID",
+                "error": "缺少游戏长ID"
+            }
+        
+        # 设置cx参数（游戏长ID）
+        params["cx"] = game_id.lower()
+        
+        # 好友码可选，如果提供了就加上
+        if friend_code:
+            if not self._validate_friend_code(friend_code):
+                return {
+                    "success": False,
+                    "message": "❌ 好友码格式错误",
+                    "error": "好友码格式错误"
+                }
+            params["code"] = friend_code.upper()
+        
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    return await self._handle_response(response)
+            except Exception as e:
+                return self._handle_error(e)
+    
+    async def _handle_response(self, response) -> Dict[str, Any]:
+        """处理响应"""
+        if response.status != 200:
+            error_detail = await self._parse_error_response(response)
+            return {
+                "success": False,
+                "message": f"❌ API请求失败: {error_detail}",
+                "error": f"HTTP {response.status}: {error_detail}"
+            }
+        
+        try:
+            # 手动读取响应文本并解析JSON，避免Content-Type问题
+            response_text = await response.text()
+            data = json.loads(response_text)
             
-            height_type = self._calculate_height_type(height_value, min_height, max_height)
-            to_min_diff = max(0, min_height - height_value) if height_value is not None and min_height is not None else 0
-            to_max_diff = max(0, height_value - max_height) if height_value is not None and max_height is not None else 0
+            if data.get("code") != 200:
+                error_msg = data.get("msg", "未知错误")
+                return {
+                    "success": False,
+                    "message": f"❌ API返回错误: {error_msg}",
+                    "error": error_msg
+                }
+            
+            formatted_result = self._format_data(data)
+            return {
+                "success": True,
+                "message": formatted_result
+            }
+        except json.JSONDecodeError as e:
+            return {
+                "success": False,
+                "message": f"❌ 解析JSON失败: {str(e)}",
+                "error": f"JSON解析错误: {str(e)}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"❌ 解析响应失败: {str(e)}",
+                "error": f"解析错误: {str(e)}"
+            }
+    
+    def _format_data(self, data: Dict[str, Any]) -> str:
+        """格式化数据"""
+        try:
+            data_info = data.get("data", {})
+            score_info = data.get("score", {})
+            adorn_info = data.get("adorn", {})
+            action_info = data.get("action", {})
+            
+            scale = self._safe_float(data_info.get("scale"))
+            height = self._safe_float(data_info.get("height"))
+            current_height = self._safe_float(data_info.get("currentHeight"))
+            max_height = self._safe_float(data_info.get("maxHeight"))
+            min_height = self._safe_float(data_info.get("minHeight"))
+            height_desc = data_info.get("heightDesc", "未知")
+
+            if height_desc.startswith("当前身高："):
+                height_desc = height_desc.replace("当前身高：", "").strip()
             
             result = [
-                "✨ 身高查询结果",
-                "━━━━━━━━━━━━━━━━",
-                f"📊 体型值(s值): {s_value:.8f}" if s_value is not None else "📊 体型值(s值): None",
-                f"📊 身高值(h值): {h_value:.8f}" if h_value is not None else "📊 身高值(h值): None",
-                f"📈 最高身高: {max_height:.8f}" if max_height is not None else "📈 最高身高: None",
-                f"📉 最矮身高: {min_height:.8f}" if min_height is not None else "📉 最矮身高: None",
-                f"✨ 当前身高: {height_value:.8f}" if height_value is not None else "✨ 当前身高: None",
-                f"🏷️ 身高类型: {height_type}",
+                "✨ 应天平台 - 身高查询结果",
+                "━━━━━━━━━━━━━━━━━━━━",
+                f"📊 体型值(s值): {scale}" if scale is not None else "📊 体型值(s值): 未知",
+                f"📊 身高值(h值): {height}" if height is not None else "📊 身高值(h值): 未知",
+                f"✨ 当前身高: {current_height}" if current_height is not None else "✨ 当前身高: 未知",
+                f"📈 最高身高: {max_height}" if max_height is not None else "📈 最高身高: 未知",
+                f"📉 最矮身高: {min_height}" if min_height is not None else "📉 最矮身高: 未知",
+                f"🏷️ 身高描述: {height_desc}",
                 "",
-                f"🎯 距离最矮: {to_min_diff:.8f}" if to_min_diff > 0 else "🎯 已达到最矮身高",
-                f"🎯 距离最高: {to_max_diff:.8f}" if to_max_diff > 0 else "🎯 已达到最高身高",
-                "━━━━━━━━━━━━━━━━"
+                "📊 评分信息:",
+                f"  • 体型值评分: {score_info.get('scaleScore', '未知')}分",
+                f"  • 身高值评分: {score_info.get('heightScore', '未知')}分", 
+                f"  • 当前身高评分: {score_info.get('currentHeightScore', '未知')}分",
+                f"  • 最高身高评分: {score_info.get('maxHeightScore', '未知')}分",
+                f"  • 最矮身高评分: {score_info.get('minHeightScore', '未知')}分",
+                "",
+                "👗 装扮信息:",
+                f"  • 斗篷: {adorn_info.get('cloak', '未知')}",
+                f"  • 发型: {adorn_info.get('hair', '未知')}",
+                f"  • 面具: {adorn_info.get('mask', '未知')}",
+                f"  • 裤子: {adorn_info.get('pants', '未知')}",
+                f"  • 道具: {adorn_info.get('prop', '未知')}",
+                f"  • 头饰: {adorn_info.get('horn', '未知')}",
+                f"  • 项链: {adorn_info.get('neck', '未知')}",
+                "",
+                "🎭 动作信息:",
+                f"  • 站姿: {action_info.get('attitude', '未知')}",
+                f"  • 叫声: {action_info.get('voice', '未知')}",
+                "━━━━━━━━━━━━━━━━━━━━"
             ]
             
-            return "\n".join(result)
-        except (ValueError, TypeError) as e:
-            return f"❌ 解析数据失败: {str(e)}"
+            return "\n".join([line for line in result if line.strip()])
+        except Exception as e:
+            return f"❌ 解析应天平台数据失败: {str(e)}"
     
     def _safe_float(self, value, default=None):
-        """安全地将值转换为浮点数，处理 None 值"""
+        """安全转换浮点数"""
         if value is None:
             return default
         try:
@@ -293,34 +847,84 @@ class HeightQueryCommand(BaseCommand):
     def _calculate_height_type(self, h_value: float, min_height: float, max_height: float) -> str:
         """计算身高类型"""
         if h_value is None or min_height is None or max_height is None:
-            return "None"
+            return "未知"
         
         height_range = min_height - max_height
         if height_range <= 0:
-            return self.HEIGHT_TYPES["medium"]
+            return self.height_types["medium"]
         
         position = (h_value - max_height) / height_range
         
         if position < 0.2:
-            return self.HEIGHT_TYPES["very_tall"]
+            return self.height_types["very_tall"]
         elif position < 0.4:
-            return self.HEIGHT_TYPES["tall"]
+            return self.height_types["tall"]
         elif position < 0.6:
-            return self.HEIGHT_TYPES["medium"]
+            return self.height_types["medium"]
         elif position < 0.8:
-            return self.HEIGHT_TYPES["short"]
+            return self.height_types["short"]
         else:
-            return self.HEIGHT_TYPES["very_short"]
+            return self.height_types["very_short"]
+    
+    @staticmethod
+    def _validate_game_id(game_id: str) -> bool:
+        """验证游戏ID格式"""
+        uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        return re.match(uuid_pattern, game_id.lower()) is not None
+    
+    @staticmethod
+    def _validate_friend_code(friend_code: str) -> bool:
+        """验证好友码格式"""
+        friend_code_pattern = r"^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$"
+        return re.match(friend_code_pattern, friend_code.upper()) is not None
+    
+    async def _parse_error_response(self, response) -> str:
+        """解析错误响应"""
+        try:
+            error_data = await response.json()
+            return error_data.get("msg", str(error_data))
+        except:
+            try:
+                return await response.text()
+            except:
+                return f"状态码: {response.status}"
+    
+    def _handle_error(self, error) -> Dict[str, Any]:
+        """处理错误"""
+        if isinstance(error, aiohttp.ClientError):
+            return {
+                "success": False,
+                "message": f"❌ 网络请求错误: {str(error)}",
+                "error": f"网络错误: {str(error)}"
+            }
+        elif isinstance(error, asyncio.TimeoutError):
+            return {
+                "success": False,
+                "message": "❌ 请求超时",
+                "error": "请求超时"
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"❌ 请求错误: {str(error)}",
+                "error": f"未知错误: {str(error)}"
+            }
 
 class TaskQueryCommand(BaseCommand):
     """光遇任务图片查询命令"""
-    
+
     command_name = "task"
     command_description = "获取光遇任务图片"
     command_pattern = r"^/(?:task|rw|任务|每日任务)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行任务图片查询命令"""
+
+        # 检查功能是否启用
+        if not self.get_config("settings.enable_task_query", True):
+            await self.send_text("❌ 任务查询功能未启用")
+            return False, "任务查询功能未启用", True
+        
         try:
             task_url = self.get_config("task_api.url")
             task_key = self.get_config("task_api.key")
@@ -447,13 +1051,19 @@ class TaskQueryCommand(BaseCommand):
 
 class CandleQueryCommand(BaseCommand):
     """光遇大蜡烛位置查询命令"""
-    
+
     command_name = "candle"
     command_description = "获取光遇大蜡烛位置图片"
     command_pattern = r"^/(?:candle|dl|大蜡|大蜡烛)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行大蜡烛位置查询命令"""
+
+        # 检查功能是否启用
+        if not self.get_config("settings.enable_candle_query", True):
+            await self.send_text("❌ 大蜡烛查询功能未启用")
+            return False, "大蜡烛查询功能未启用", True
+    
         try:
             candle_url = self.get_config("candle_api.url")
             candle_key = self.get_config("candle_api.key")
@@ -580,13 +1190,19 @@ class CandleQueryCommand(BaseCommand):
 
 class AncestorQueryCommand(BaseCommand):
     """光遇复刻先祖位置查询命令"""
-    
+
     command_name = "ancestor"
     command_description = "获取光遇复刻先祖位置图片"
     command_pattern = r"^/(?:ancestor|fk|复刻|先祖|复刻先祖)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行复刻先祖位置查询命令"""
+
+        # 检查功能是否启用
+        if not self.get_config("settings.enable_ancestor_query", True):
+            await self.send_text("❌ 复刻先祖查询功能未启用")
+            return False, "复刻先祖查询功能未启用", True
+
         try:
             ancestor_url = self.get_config("ancestor_api.url")
             ancestor_key = self.get_config("ancestor_api.key")
@@ -730,13 +1346,19 @@ class AncestorQueryCommand(BaseCommand):
 
 class MagicQueryCommand(BaseCommand):
     """光遇每日魔法查询命令"""
-    
+
     command_name = "magic"
     command_description = "获取光遇每日魔法图片"
     command_pattern = r"^/(?:magic|mf|魔法|每日魔法)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行每日魔法查询命令"""
+
+        # 检查功能是否启用
+        if not self.get_config("settings.enable_magic_query", True):
+            await self.send_text("❌ 每日魔法查询功能未启用")
+            return False, "每日魔法查询功能未启用", True
+
         try:
             magic_url = self.get_config("magic_api.url")
             magic_key = self.get_config("magic_api.key")
@@ -814,13 +1436,19 @@ class MagicQueryCommand(BaseCommand):
 
 class SeasonCandleQueryCommand(BaseCommand):
     """光遇每日季蜡位置查询命令"""
-    
+
     command_name = "season_candle"
     command_description = "获取光遇每日季蜡位置图片"
     command_pattern = r"^/(?:scandel|jl|季蜡|季节蜡烛|季蜡位置)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行每日季蜡位置查询命令"""
+
+        # 检查功能是否启用
+        if not self.get_config("settings.enable_season_candle_query", True):
+            await self.send_text("❌ 季蜡查询功能未启用")
+            return False, "季蜡查询功能未启用", True
+
         try:
             season_candle_url = self.get_config("season_candle_api.url")
             season_candle_key = self.get_config("season_candle_api.key")
@@ -898,13 +1526,19 @@ class SeasonCandleQueryCommand(BaseCommand):
 
 class CalendarQueryCommand(BaseCommand):
     """光遇日历查询命令"""
-    
+
     command_name = "calendar"
     command_description = "获取光遇日历图片"
     command_pattern = r"^/(?:calendar|rl|日历|活动日历)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行光遇日历查询命令"""
+        
+        # 检查功能是否启用
+        if not self.get_config("settings.enable_calendar_query", True):
+            await self.send_text("❌ 日历查询功能未启用")
+            return False, "日历查询功能未启用", True
+
         try:
             calendar_url = self.get_config("calendar_api.url")
             calendar_key = self.get_config("calendar_api.key")
@@ -982,13 +1616,19 @@ class CalendarQueryCommand(BaseCommand):
 
 class RedStoneQueryCommand(BaseCommand):
     """光遇红石位置查询命令"""
-    
+
     command_name = "redstone"
     command_description = "获取光遇红石位置图片"
     command_pattern = r"^/(?:redstone|hs|红石|红石位置)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行红石位置查询命令"""
+
+        # 检查功能是否启用
+        if not self.get_config("settings.enable_redstone_query", True):
+            await self.send_text("❌ 红石查询功能未启用")
+            return False, "红石查询功能未启用", True
+
         try:
             redstone_url = self.get_config("redstone_api.url")
             redstone_key = self.get_config("redstone_api.key")
@@ -1063,6 +1703,257 @@ class RedStoneQueryCommand(BaseCommand):
                     "error": f"未知错误: {str(e)}",
                     "image_data": None
                 }
+class SkyTestCommand(BaseCommand):
+    """光遇服务器状态查询命令"""
+
+    command_name = "skytest"
+    command_description = "查询光遇服务器状态"
+    command_pattern = r"^/skytest$"
+    
+    async def execute(self) -> Tuple[bool, Optional[str], bool]:
+        """执行服务器状态查询命令"""
+        
+        # 检查功能是否启用
+        if not self.get_config("settings.enable_skytest_query", True):
+            await self.send_text("❌ 服务器状态查询功能未启用")
+            return False, "服务器状态查询功能未启用", True
+
+        try:
+            skytest_url = self.get_config("skytest_api.url")
+            skytest_key = self.get_config("skytest_api.key")
+            timeout = self.get_config("skytest_api.timeout")
+            
+            if not skytest_key or skytest_key == "你的服务器状态API密钥":
+                await self.send_text("❌ 插件未配置服务器状态API密钥")
+                return False, "服务器状态API密钥未配置", True
+            
+            # await self.send_text("🔄 正在查询服务器状态...")
+            
+            result = await self._get_server_status(skytest_url, skytest_key, timeout)
+            
+            if result["success"]:
+                await self.send_text(result["message"])
+                return True, "服务器状态查询成功", True
+            else:
+                await self.send_text(result["message"])
+                return False, result.get("error", "服务器状态查询失败"), True
+                
+        except Exception as e:
+            await self.send_text(f"❌ 查询错误: {str(e)}")
+            return False, f"服务器状态查询错误: {str(e)}", True
+    
+    async def _get_server_status(self, url: str, key: str, timeout: int) -> Dict[str, Any]:
+        """调用服务器状态API"""
+        params = {
+            "key": key,
+            "time": str(int(time.time()))
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status != 200:
+                        error_detail = await self._parse_error_response(response)
+                        return {
+                            "success": False,
+                            "message": f"❌ API请求失败: {error_detail}",
+                            "error": f"HTTP {response.status}: {error_detail}"
+                        }
+                    
+                    data = await response.json()
+                    
+                    # 检查返回数据格式
+                    if "msg" not in data:
+                        return {
+                            "success": False,
+                            "message": "❌ API返回数据格式错误",
+                            "error": "缺少msg字段"
+                        }
+                    
+                    server_status = data["msg"]
+                    
+                    return {
+                        "success": True,
+                        "message": f"🔍 服务器状态查询结果：\n━━━━━━━━━━━━━━━━\n{server_status}\n━━━━━━━━━━━━━━━━"
+                    }
+                    
+            except aiohttp.ClientError as e:
+                return {
+                    "success": False,
+                    "message": f"❌ 网络错误: {str(e)}",
+                    "error": f"网络错误: {str(e)}"
+                }
+            except asyncio.TimeoutError:
+                return {
+                    "success": False,
+                    "message": "❌ 请求超时",
+                    "error": "请求超时"
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"❌ 请求错误: {str(e)}",
+                    "error": f"未知错误: {str(e)}"
+                }
+
+    async def _parse_error_response(self, response) -> str:
+        """解析错误响应"""
+        try:
+            error_data = await response.json()
+            if "message" in error_data:
+                return error_data["message"]
+            return str(error_data)
+        except:
+            try:
+                return await response.text()
+            except:
+                return f"状态码: {response.status}"
+
+class ConfigMonitor:
+    """安全的配置文件监控器 - 避免卡死主程序"""
+    
+    def __init__(self, plugin):
+        self.plugin = plugin
+        self.is_running = False
+        self.task = None
+        self._reload_in_progress = False
+        self.config_path = self._get_config_path()
+    
+    async def start(self):
+        """安全启动配置监控任务"""
+        if self.is_running:
+            return
+        
+        self.is_running = True
+        # 使用create_task而不是直接await，避免阻塞
+        self.task = asyncio.create_task(self._safe_monitor_loop())
+        logger.info("安全配置监控已启动")
+    
+    async def stop(self):
+        """安全停止配置监控任务"""
+        if not self.is_running:
+            return
+        
+        self.is_running = False
+        if self.task and not self.task.done():
+            self.task.cancel()
+            try:
+                # 设置超时，避免无限等待
+                await asyncio.wait_for(self.task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                logger.warning("配置监控任务停止超时，强制取消")
+        
+        logger.info("配置监控已安全停止")
+    
+    async def _safe_monitor_loop(self):
+        """安全的监控循环"""
+        check_interval = 5  # 5秒检查一次，减少频率
+        
+        logger.info(f"开始安全监控配置文件，检查间隔: {check_interval}秒")
+        
+        last_successful_check = time.time()
+        
+        while self.is_running:
+            try:
+                # 使用可中断的sleep
+                await asyncio.sleep(check_interval)
+                
+                # 检查是否过于频繁
+                if time.time() - last_successful_check < check_interval:
+                    continue
+                
+                # 执行安全检查
+                await self._safe_check_config()
+                last_successful_check = time.time()
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"配置监控出错，等待恢复: {str(e)}")
+                # 出错后延长等待时间
+                await asyncio.sleep(60)
+    
+    async def _safe_check_config(self):
+        """安全的配置检查"""
+        if self._reload_in_progress:
+            logger.debug("重载操作正在进行中，跳过检查")
+            return
+        
+        if not os.path.exists(self.config_path):
+            return
+        
+        try:
+            # 快速检查文件状态（非阻塞）
+            current_mtime = os.path.getmtime(self.config_path)
+            
+            # 使用属性存储状态，避免复杂初始化
+            if not hasattr(self, '_last_mtime'):
+                self._last_mtime = current_mtime
+                return
+            
+            # 只有当修改时间确实变化时才继续
+            if current_mtime <= self._last_mtime:
+                return
+            
+            # 标记重载进行中
+            self._reload_in_progress = True
+            
+            # 延迟读取文件内容，避免频繁IO
+            await asyncio.sleep(1)  # 给文件系统时间完成写入
+            
+            # 读取文件内容（在try中确保异常处理）
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                current_content = f.read()
+            
+            # 比较内容
+            if not hasattr(self, '_last_content') or current_content != self._last_content:
+                logger.info("检测到配置变化，准备安全重载...")
+                
+                # 更新状态
+                self._last_mtime = current_mtime
+                self._last_content = current_content
+                
+                # 在重载前先停止当前监控
+                await self.stop()
+                
+                # 安全重载插件（带超时）
+                await self._safe_reload_plugin()
+            else:
+                # 只更新时间戳
+                self._last_mtime = current_mtime
+                
+        except Exception as e:
+            logger.error(f"配置检查失败: {str(e)}")
+        finally:
+            # 确保标志被重置
+            self._reload_in_progress = False
+    
+    async def _safe_reload_plugin(self):
+        """安全重载插件"""
+        try:
+            # 设置重载超时
+            logger.info("开始安全重载插件...")
+            
+            # 使用wait_for设置超时
+            success = await asyncio.wait_for(
+                plugin_manage_api.reload_plugin(self.plugin.plugin_name),
+                timeout=30.0  # 30秒超时
+            )
+            
+            if success:
+                logger.info("插件安全重载成功")
+            else:
+                logger.error("插件重载失败")
+                
+        except asyncio.TimeoutError:
+            logger.error("插件重载超时，可能卡死，已取消操作")
+        except Exception as e:
+            logger.error(f"重载插件时出错: {str(e)}")
+    
+    def _get_config_path(self):
+        """获取配置文件路径"""
+        plugin_dir = getattr(self.plugin, 'plugin_directory', os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(plugin_dir, "config.toml")
 
 @register_plugin
 class SkyToolsPlugin(BasePlugin):
@@ -1075,23 +1966,76 @@ class SkyToolsPlugin(BasePlugin):
     config_file_name = "config.toml"
     
     config_section_descriptions = {
+        "plugin": "插件基本配置",
         "height_api": "身高查询API配置",
         "task_api": "任务图片API配置",
         "candle_api": "大蜡烛位置API配置",
         "settings": "插件通用设置"
     }
-    
+
     config_schema = {
+        "plugin": {
+            "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
+            "config_version": ConfigField(type=str, default="1.1.4", description="配置文件版本"),
+        },
         "height_api": {
-            "url": ConfigField(
+            "default_platform": ConfigField(
+                type=str, 
+                default="mango", 
+                description="默认身高查询平台",
+                choices=["mango", "ovoav", "yingtian"]
+            ),
+            "platform_aliases": ConfigField(
+                type=list,
+                default=["mango:芒果,mg", "ovoav:独角兽,djs", "yingtian:应天,yt"],
+                description="平台别名配置，格式：主平台名:别名1,别名2,..."
+            ),
+            "enable_mango": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用芒果平台身高查询"
+            ),
+            "enable_ovoav": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用独角兽平台身高查询"
+            ),
+            "enable_yingtian": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用应天平台身高查询"
+            ),
+            "mango_url": ConfigField(
                 type=str, 
                 default="https://api.mangotool.cn/sky/out/cn", 
-                description="身高查询API地址"
+                description="芒果工具身高查询API地址"
             ),
-            "key": ConfigField(
+            "mango_key": ConfigField(
                 type=str, 
-                default="你的身高API密钥", 
-                description="身高查询API密钥，获取方式：芒果工具： https://mangotool.cn/openAPI",
+                default="你的芒果工具API密钥", 
+                description="芒果工具身高查询API密钥，获取方式：芒果工具：https://mangotool.cn/openAPI",
+                required=True
+            ),
+            "ovoav_url": ConfigField(
+                type=str, 
+                default="https://ovoav.com/api/sky/sgwz/sgv1", 
+                description="独角兽平台身高查询API地址"
+            ),
+            "ovoav_key": ConfigField(
+                type=str, 
+                default="你的独角兽平台API密钥", 
+                description="独角兽平台身高查询API密钥，获取方式：独角兽API：https://ovoav.com",
+                required=True
+            ),
+            "yingtian_url": ConfigField(
+                type=str, 
+                default="https://api.t1qq.com/api/sky/sc/sg", 
+                description="应天平台身高查询API地址"
+            ),
+            "yingtian_key": ConfigField(
+                type=str, 
+                default="你的应天平台API密钥", 
+                description="应天平台身高查询API密钥，获取方式：应天API：https://api.t1qq.com",
                 required=True
             ),
             "timeout": ConfigField(
@@ -1226,20 +2170,96 @@ class SkyToolsPlugin(BasePlugin):
                 description="红石API请求超时时间（秒）"
             )
         },
+        "skytest_api": {
+            "url": ConfigField(
+                type=str, 
+                default="https://ovoav.com/api/sky/gyzt/zt", 
+                description="服务器状态测试API地址"
+            ),
+            "key": ConfigField(
+                type=str, 
+                default="你的服务器状态API密钥", 
+                description="服务器状态测试API密钥，获取方式：独角兽API：https://ovoav.com",
+                required=True
+            ),
+            "timeout": ConfigField(
+                type=int, 
+                default=15, 
+                description="服务器状态API请求超时时间（秒）"
+            )
+        },
         "settings": {
-            "enable_help": ConfigField(
+            "enable_height_query": ConfigField(
                 type=bool, 
                 default=True, 
-                description="是否启用帮助命令"
+                description="是否启用身高查询功能"
             ),
-            "debug_mode": ConfigField(
+            "enable_task_query": ConfigField(
                 type=bool, 
-                default=False, 
-                description="是否启用调试模式"
+                default=True, 
+                description="是否启用任务查询功能"
+            ),
+            "enable_candle_query": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用大蜡烛查询功能"
+            ),
+            "enable_ancestor_query": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用复刻先祖查询功能"
+            ),
+            "enable_magic_query": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用每日魔法查询功能"
+            ),
+            "enable_season_candle_query": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用季蜡查询功能"
+            ),
+            "enable_calendar_query": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用日历查询功能"
+            ),
+            "enable_redstone_query": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用红石查询功能"
+            ),
+            "enable_skytest_query": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用服务器状态查询功能"
             )
         }
     }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.config_monitor = None
+        
+        # 如果启用插件，初始化配置监控
+        if self.get_config("plugin.enabled", True):
+            self.enable_plugin = True
+            self.config_monitor = ConfigMonitor(self)
+            # 延迟10秒启动监控
+            asyncio.create_task(self._start_config_monitor_after_delay())
+    
+    async def _start_config_monitor_after_delay(self):
+        """延迟10秒启动配置监控任务"""
+        await asyncio.sleep(10)
+        if self.config_monitor:
+            await self.config_monitor.start()
+    
+    async def on_unload(self):
+        """插件卸载时调用"""
+        if self.config_monitor:
+            await self.config_monitor.stop()
+        await super().on_unload()
+           
     def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
         """返回插件包含的组件列表"""
         return [
@@ -1252,4 +2272,5 @@ class SkyToolsPlugin(BasePlugin):
             (SeasonCandleQueryCommand.get_command_info(), SeasonCandleQueryCommand),
             (CalendarQueryCommand.get_command_info(), CalendarQueryCommand),
             (RedStoneQueryCommand.get_command_info(), RedStoneQueryCommand),
+            (SkyTestCommand.get_command_info(), SkyTestCommand),
         ]
