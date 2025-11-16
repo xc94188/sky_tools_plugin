@@ -15,6 +15,9 @@ from src.plugin_system import (
 )
 from src.plugin_system.apis import plugin_manage_api
 import os
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+import threading
 
 logger = get_logger('sky_tools_plugin')
 
@@ -317,7 +320,7 @@ class HeightQueryCommand(BaseCommand):
             help_text.extend([
                 "芒果平台:",
                 "/height mango xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-                "/height mg xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx XXXX-XXXX-XXXX"
+                "/height mg xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx XXXX-XXXX-XXXX",
                 ""
             ])
         
@@ -1809,152 +1812,411 @@ class SkyTestCommand(BaseCommand):
             except:
                 return f"状态码: {response.status}"
 
+# class ConfigMonitor:
+#     """安全的配置文件监控器 - 避免卡死主程序"""
+    
+#     def __init__(self, plugin):
+#         self.plugin = plugin
+#         self.is_running = False
+#         self.task = None
+#         self._reload_in_progress = False
+#         self.config_path = self._get_config_path()
+    
+#     async def start(self):
+#         """安全启动配置监控任务"""
+#         if self.is_running:
+#             return
+        
+#         self.is_running = True
+#         # 使用create_task而不是直接await，避免阻塞
+#         self.task = asyncio.create_task(self._safe_monitor_loop())
+#         logger.info("安全配置监控已启动")
+    
+#     async def stop(self):
+#         """安全停止配置监控任务"""
+#         if not self.is_running:
+#             return
+        
+#         self.is_running = False
+#         if self.task and not self.task.done():
+#             self.task.cancel()
+#             try:
+#                 # 设置超时，避免无限等待
+#                 await asyncio.wait_for(self.task, timeout=5.0)
+#             except (asyncio.CancelledError, asyncio.TimeoutError):
+#                 logger.warning("配置监控任务停止超时，强制取消")
+        
+#         logger.info("配置监控已安全停止")
+    
+#     async def _safe_monitor_loop(self):
+#         """安全的监控循环"""
+#         check_interval = 10  # 10秒检查一次
+        
+#         logger.info(f"开始安全监控配置文件，检查间隔: {check_interval}秒")
+        
+#         last_successful_check = time.time()
+        
+#         while self.is_running:
+#             try:
+#                 # 使用可中断的sleep
+#                 await asyncio.sleep(check_interval)
+                
+#                 # 检查是否过于频繁
+#                 if time.time() - last_successful_check < check_interval:
+#                     continue
+                
+#                 # 执行安全检查
+#                 await self._safe_check_config()
+#                 last_successful_check = time.time()
+                
+#             except asyncio.CancelledError:
+#                 break
+#             except Exception as e:
+#                 logger.error(f"配置监控出错，等待恢复: {str(e)}")
+#                 # 出错后延长等待时间
+#                 await asyncio.sleep(60)
+    
+#     async def _safe_check_config(self):
+#         """安全的配置检查"""
+#         if self._reload_in_progress:
+#             logger.debug("重载操作正在进行中，跳过检查")
+#             return
+        
+#         if not os.path.exists(self.config_path):
+#             return
+        
+#         try:
+#             # 快速检查文件状态（非阻塞）
+#             current_mtime = os.path.getmtime(self.config_path)
+            
+#             # 使用属性存储状态，避免复杂初始化
+#             if not hasattr(self, '_last_mtime'):
+#                 self._last_mtime = current_mtime
+#                 return
+            
+#             # 只有当修改时间确实变化时才继续
+#             if current_mtime <= self._last_mtime:
+#                 return
+            
+#             # 标记重载进行中
+#             self._reload_in_progress = True
+            
+#             # 延迟读取文件内容，避免频繁IO
+#             await asyncio.sleep(1)  # 给文件系统时间完成写入
+            
+#             # 读取文件内容（在try中确保异常处理）
+#             with open(self.config_path, 'r', encoding='utf-8') as f:
+#                 current_content = f.read()
+            
+#             # 比较内容
+#             if not hasattr(self, '_last_content') or current_content != self._last_content:
+#                 logger.info("检测到配置变化，准备安全重载...")
+                
+#                 # 更新状态
+#                 self._last_mtime = current_mtime
+#                 self._last_content = current_content
+                
+#                 # 在重载前先停止当前监控
+#                 await self.stop()
+                
+#                 # 安全重载插件（带超时）
+#                 await self._safe_reload_plugin()
+#             else:
+#                 # 只更新时间戳
+#                 self._last_mtime = current_mtime
+                
+#         except Exception as e:
+#             logger.error(f"配置检查失败: {str(e)}")
+#         finally:
+#             # 确保标志被重置
+#             self._reload_in_progress = False
+    
+#     async def _safe_reload_plugin(self):
+#         """安全重载插件"""
+
+#         try:
+#             # 设置重载超时
+#             logger.info("开始安全重载插件...")
+            
+#             # 使用wait_for设置超时
+#             success = await asyncio.wait_for(
+#                 plugin_manage_api.reload_plugin(self.plugin.plugin_name),
+#                 timeout=30.0  # 30秒超时
+#             )
+            
+#             if success:
+#                 logger.info("插件安全重载成功")
+#             else:
+#                 logger.error("插件重载失败")
+                
+#         except asyncio.TimeoutError:
+#             logger.error("插件重载超时，可能卡死，已取消操作")
+#         except Exception as e:
+#             logger.error(f"重载插件时出错: {str(e)}")
+    
+#     def _get_config_path(self):
+#         """获取配置文件路径"""
+#         plugin_dir = getattr(self.plugin, 'plugin_directory', os.path.dirname(os.path.abspath(__file__)))
+#         return os.path.join(plugin_dir, "config.toml")
+
+class AsyncWatchdogHandler(FileSystemEventHandler):
+    """异步安全的 Watchdog 处理器"""
+    
+    def __init__(self, callback, loop):
+        self.callback = callback
+        self.loop = loop
+        self._last_trigger_time = 0
+        self._debounce_task = None
+        
+    def on_modified(self, event):
+        """文件修改事件处理"""
+        if not event.is_directory and event.src_path.endswith('config.toml'):
+            self._handle_config_change()
+    
+    def on_closed(self, event):
+        """文件关闭事件处理"""
+        if not event.is_directory and event.src_path.endswith('config.toml'):
+            self._handle_config_change()
+    
+    def _handle_config_change(self):
+        """处理配置变化 - 线程安全版本"""
+        current_time = time.time()
+        
+        # 防抖处理：3秒内只触发一次
+        if current_time - self._last_trigger_time < 3:
+            return
+            
+        self._last_trigger_time = current_time
+        
+        # 使用线程安全的方式调用异步函数
+        if self._debounce_task and not self._debounce_task.done():
+            self._debounce_task.cancel()
+        
+        # 使用 run_coroutine_threadsafe 在正确的loop中运行
+        self._debounce_task = asyncio.run_coroutine_threadsafe(
+            self._debounced_reload(), 
+            self.loop
+        )
+    
+    async def _debounced_reload(self):
+        """防抖重载"""
+        logger.info("🔍 检测到配置文件变化，等待防抖延迟...")
+        await asyncio.sleep(2.0)  # 2秒防抖延迟
+        await self.callback()
+
 class ConfigMonitor:
-    """安全的配置文件监控器 - 避免卡死主程序"""
+    """智能配置监控器 - 单例模式确保每个插件只有一个实例"""
+    
+    _instances = {}  # 类变量，存储每个插件的单例实例
+    _lock = asyncio.Lock()  # 异步锁，防止并发问题
+    
+    def __new__(cls, plugin):
+        """单例模式，确保每个插件只有一个监控实例"""
+        plugin_name = plugin.plugin_name
+        
+        # 如果实例不存在，创建新实例
+        if plugin_name not in cls._instances:
+            instance = super().__new__(cls)
+            cls._instances[plugin_name] = instance
+            instance._initialized = False
+            logger.debug(f"🆕 创建新的 ConfigMonitor 实例: {plugin_name}")
+        else:
+            logger.debug(f"🔄 重用现有的 ConfigMonitor 实例: {plugin_name}")
+            
+        return cls._instances[plugin_name]
     
     def __init__(self, plugin):
+        # 防止重复初始化
+        if getattr(self, '_initialized', False):
+            logger.debug(f"⏭️  跳过重复初始化: {plugin.plugin_name}")
+            return
+            
         self.plugin = plugin
+        self.plugin_name = plugin.plugin_name  # 存储插件名称
         self.is_running = False
-        self.task = None
+        self.observer = None
         self._reload_in_progress = False
         self.config_path = self._get_config_path()
+        self.loop = asyncio.get_event_loop()
+        self._initialized = True
+        
+        logger.info(f"🔧 ConfigMonitor 初始化完成: {self.plugin_name}")
+        logger.info(f"📁 监控路径: {self.config_path}")
     
     async def start(self):
-        """安全启动配置监控任务"""
-        if self.is_running:
-            return
-        
-        self.is_running = True
-        # 使用create_task而不是直接await，避免阻塞
-        self.task = asyncio.create_task(self._safe_monitor_loop())
-        logger.info("安全配置监控已启动")
-    
-    async def stop(self):
-        """安全停止配置监控任务"""
-        if not self.is_running:
-            return
-        
-        self.is_running = False
-        if self.task and not self.task.done():
-            self.task.cancel()
+        """启动配置监控"""
+        async with self._lock:  # 使用锁防止并发启动
+            if self.is_running:
+                logger.warning(f"⚠️ {self.plugin_name} 配置监控已经在运行")
+                return
+            
+            self.is_running = True
+            logger.info(f"🚀 开始启动 {self.plugin_name} 配置监控...")
+            
             try:
-                # 设置超时，避免无限等待
-                await asyncio.wait_for(self.task, timeout=5.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                logger.warning("配置监控任务停止超时，强制取消")
-        
-        logger.info("配置监控已安全停止")
+                import watchdog
+                logger.info(f"🔧 {self.plugin_name} - watchdog 可用，启动 Watchdog 监控")
+                await self._start_watchdog_monitor()
+            except ImportError:
+                logger.warning(f"📋 {self.plugin_name} - watchdog 未安装，使用轮询模式")
+                await self._start_polling_monitor()
+            except Exception as e:
+                logger.error(f"❌ {self.plugin_name} - 配置监控启动失败: {str(e)}，使用轮询模式")
+                await self._start_polling_monitor()
     
-    async def _safe_monitor_loop(self):
-        """安全的监控循环"""
-        check_interval = 5  # 5秒检查一次，减少频率
-        
-        logger.info(f"开始安全监控配置文件，检查间隔: {check_interval}秒")
-        
-        last_successful_check = time.time()
+    async def _start_watchdog_monitor(self):
+        """启动 Watchdog 监控"""
+        try:
+            from watchdog.observers import Observer
+            
+            self.observer = Observer()
+            handler = AsyncWatchdogHandler(self._safe_reload_plugin, self.loop)
+            
+            monitor_path = os.path.dirname(self.config_path)
+            logger.info(f"📂 {self.plugin_name} - Watchdog 监控目录: {monitor_path}")
+            
+            self.observer.schedule(
+                handler,
+                path=monitor_path,
+                recursive=False
+            )
+            self.observer.start()
+            
+            logger.info(f"✅ {self.plugin_name} - Watchdog 配置监控已启动")
+            
+        except Exception as e:
+            logger.error(f"❌ {self.plugin_name} - Watchdog 监控启动失败: {str(e)}，回退到轮询模式")
+            await self._start_polling_monitor()
+    
+    async def _start_polling_monitor(self):
+        """启动轮询监控（备用）"""
+        self.task = asyncio.create_task(self._polling_loop())
+        logger.info(f"🔄 {self.plugin_name} - 轮询配置监控已启动")
+    
+    async def _polling_loop(self):
+        """轮询监控循环"""
+        check_interval = 30
         
         while self.is_running:
             try:
-                # 使用可中断的sleep
                 await asyncio.sleep(check_interval)
-                
-                # 检查是否过于频繁
-                if time.time() - last_successful_check < check_interval:
-                    continue
-                
-                # 执行安全检查
                 await self._safe_check_config()
-                last_successful_check = time.time()
-                
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"配置监控出错，等待恢复: {str(e)}")
-                # 出错后延长等待时间
+                logger.error(f"❌ {self.plugin_name} - 轮询监控出错: {str(e)}")
                 await asyncio.sleep(60)
     
     async def _safe_check_config(self):
-        """安全的配置检查"""
-        if self._reload_in_progress:
-            logger.debug("重载操作正在进行中，跳过检查")
-            return
-        
-        if not os.path.exists(self.config_path):
+        """安全的配置检查（用于轮询模式）"""
+        if self._reload_in_progress or not os.path.exists(self.config_path):
             return
         
         try:
-            # 快速检查文件状态（非阻塞）
             current_mtime = os.path.getmtime(self.config_path)
             
-            # 使用属性存储状态，避免复杂初始化
             if not hasattr(self, '_last_mtime'):
                 self._last_mtime = current_mtime
                 return
             
-            # 只有当修改时间确实变化时才继续
-            if current_mtime <= self._last_mtime:
-                return
-            
-            # 标记重载进行中
-            self._reload_in_progress = True
-            
-            # 延迟读取文件内容，避免频繁IO
-            await asyncio.sleep(1)  # 给文件系统时间完成写入
-            
-            # 读取文件内容（在try中确保异常处理）
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                current_content = f.read()
-            
-            # 比较内容
-            if not hasattr(self, '_last_content') or current_content != self._last_content:
-                logger.info("检测到配置变化，准备安全重载...")
-                
-                # 更新状态
+            if current_mtime > self._last_mtime:
+                logger.info(f"🔍 {self.plugin_name} - 检测到配置文件变化")
                 self._last_mtime = current_mtime
-                self._last_content = current_content
-                
-                # 在重载前先停止当前监控
-                await self.stop()
-                
-                # 安全重载插件（带超时）
                 await self._safe_reload_plugin()
-            else:
-                # 只更新时间戳
-                self._last_mtime = current_mtime
                 
         except Exception as e:
-            logger.error(f"配置检查失败: {str(e)}")
-        finally:
-            # 确保标志被重置
-            self._reload_in_progress = False
+            logger.error(f"❌ {self.plugin_name} - 配置检查失败: {str(e)}")
     
     async def _safe_reload_plugin(self):
         """安全重载插件"""
-        try:
-            # 设置重载超时
-            logger.info("开始安全重载插件...")
+        if self._reload_in_progress:
+            logger.warning(f"⏳ {self.plugin_name} - 重载操作正在进行中")
+            return
             
-            # 使用wait_for设置超时
+        self._reload_in_progress = True
+        
+        try:
+            logger.info(f"🔄 {self.plugin_name} - 开始安全重载插件...")
+            
+            # 延迟确保文件写入完成
+            await asyncio.sleep(1)
+            
+            # 检查文件是否存在
+            if not os.path.exists(self.config_path):
+                logger.error(f"❌ {self.plugin_name} - 配置文件不存在")
+                return
+            
+            # 执行重载（带超时）
             success = await asyncio.wait_for(
-                plugin_manage_api.reload_plugin(self.plugin.plugin_name),
-                timeout=30.0  # 30秒超时
+                plugin_manage_api.reload_plugin(self.plugin_name),
+                timeout=30.0
             )
             
             if success:
-                logger.info("插件安全重载成功")
+                logger.info(f"✅ {self.plugin_name} - 插件热重载成功")
             else:
-                logger.error("插件重载失败")
+                logger.error(f"❌ {self.plugin_name} - 插件热重载失败")
                 
         except asyncio.TimeoutError:
-            logger.error("插件重载超时，可能卡死，已取消操作")
+            logger.error(f"⏰ {self.plugin_name} - 插件重载超时")
         except Exception as e:
-            logger.error(f"重载插件时出错: {str(e)}")
+            logger.error(f"❌ {self.plugin_name} - 重载插件时出错: {str(e)}")
+        finally:
+            self._reload_in_progress = False
+    
+    async def stop(self):
+        """停止配置监控"""
+        async with self._lock:  # 使用锁防止并发停止
+            if not self.is_running:
+                logger.info(f"ℹ️ {self.plugin_name} - 配置监控未运行")
+                return
+            
+            self.is_running = False
+            logger.info(f"🛑 {self.plugin_name} - 开始停止配置监控...")
+            
+            # 停止 Watchdog 观察者
+            if hasattr(self, 'observer') and self.observer:
+                self.observer.stop()
+                self.observer.join(timeout=5)
+                self.observer = None
+                logger.info(f"👁️ {self.plugin_name} - Watchdog 观察者已停止")
+            
+            # 停止轮询任务
+            if hasattr(self, 'task') and self.task and not self.task.done():
+                self.task.cancel()
+                try:
+                    await self.task
+                except asyncio.CancelledError:
+                    pass
+                logger.info(f"🔄 {self.plugin_name} - 轮询任务已停止")
+            
+            logger.info(f"✅ {self.plugin_name} - 配置监控已完全停止")
     
     def _get_config_path(self):
         """获取配置文件路径"""
         plugin_dir = getattr(self.plugin, 'plugin_directory', os.path.dirname(os.path.abspath(__file__)))
         return os.path.join(plugin_dir, "config.toml")
-
+    
+    @classmethod
+    async def cleanup(cls, plugin_name):
+        """清理指定插件的监控实例"""
+        if plugin_name in cls._instances:
+            instance = cls._instances[plugin_name]
+            if instance.is_running:
+                await instance.stop()
+            del cls._instances[plugin_name]
+            logger.info(f"🧹 已清理 {plugin_name} 的配置监控实例")
+    
+    # @classmethod
+    # def get_instance_count(cls):
+    #     """获取当前实例数量（用于调试）"""
+    #     return len(cls._instances)
+    
+    # @classmethod
+    # def get_running_instances(cls):
+    #     """获取正在运行的实例列表（用于调试）"""
+    #     return {name: instance for name, instance in cls._instances.items() if instance.is_running}
+        
 @register_plugin
 class SkyToolsPlugin(BasePlugin):
     """光遇工具插件"""
@@ -1962,7 +2224,7 @@ class SkyToolsPlugin(BasePlugin):
     plugin_name = "sky_tools_plugin"
     enable_plugin = True
     dependencies = []
-    python_dependencies = ["aiohttp"]
+    python_dependencies = ["aiohttp", "watchdog"]
     config_file_name = "config.toml"
     
     config_section_descriptions = {
@@ -2239,26 +2501,53 @@ class SkyToolsPlugin(BasePlugin):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.config_monitor = None
+        self._monitor_start_task = None  # 跟踪启动任务
         
         # 如果启用插件，初始化配置监控
         if self.get_config("plugin.enabled", True):
             self.enable_plugin = True
+            
+            # 使用单例模式获取 ConfigMonitor
             self.config_monitor = ConfigMonitor(self)
-            # 延迟10秒启动监控
-            asyncio.create_task(self._start_config_monitor_after_delay())
+            logger.info(f"✅ {self.plugin_name} - 配置监控器初始化完成")
+            
+            # 延迟启动监控（确保只启动一次）
+            if not self._monitor_start_task or self._monitor_start_task.done():
+                self._monitor_start_task = asyncio.create_task(self._start_config_monitor_after_delay())
+        else:
+            logger.warning(f"❌ {self.plugin_name} - 插件未启用，跳过配置监控")
     
     async def _start_config_monitor_after_delay(self):
-        """延迟10秒启动配置监控任务"""
+        """延迟启动配置监控任务"""
+        logger.info(f"⏰ {self.plugin_name} - 等待10秒后启动配置监控...")
         await asyncio.sleep(10)
+        
         if self.config_monitor:
-            await self.config_monitor.start()
+            if not self.config_monitor.is_running:
+                await self.config_monitor.start()
+            else:
+                logger.info(f"ℹ️ {self.plugin_name} - 配置监控器已在运行")
+        else:
+            logger.error(f"❌ {self.plugin_name} - 配置监控器未初始化")
     
     async def on_unload(self):
         """插件卸载时调用"""
+        logger.info(f"🧹 {self.plugin_name} - 开始卸载插件...")
+        
+        # 取消启动任务
+        if self._monitor_start_task and not self._monitor_start_task.done():
+            self._monitor_start_task.cancel()
+            try:
+                await self._monitor_start_task
+            except asyncio.CancelledError:
+                pass
+        
+        # 清理配置监控
         if self.config_monitor:
-            await self.config_monitor.stop()
+            await ConfigMonitor.cleanup(self.plugin_name)
+        
         await super().on_unload()
+        logger.info(f"✅ {self.plugin_name} - 插件卸载完成")
            
     def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
         """返回插件包含的组件列表"""
