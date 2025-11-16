@@ -13,7 +13,7 @@
   },
   "homepage_url": "https://github.com/xc94188",
   "repository_url": "https://github.com/xc94188/sky_tools_plugin",
-  "keywords": ["光遇", "身高查询", "任务图片", "游戏工具", "Sky光遇"],
+  "keywords": ["光遇", "Sky", "身高查询", "任务查询", "大蜡烛", "复刻先祖", "每日魔法"],
   "categories": ["Utility Tools"],
   "default_locale": "zh-CN",
   "plugin_info": {
@@ -64,6 +64,11 @@
         "type": "command",
         "name": "redstone",
         "description": "红石位置图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "skytest",
+        "description": "检测光遇服务器状态"
       }
     ]
   }
