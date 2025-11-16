@@ -123,7 +123,7 @@ class HeightQueryCommand(BaseCommand):
     
     command_name = "height"
     command_description = "查询光遇国服玩家身高数据"
-    command_pattern = r"^/height(?:\s+(?P<platform>\w+))?(?:\s+(?P<game_id>[^\s]+)(?:\s+(?P<friend_code>[^\s]+))?)?$"
+    command_pattern = r"^/(?:height|身高)(?:\s+(?P<platform>\w+))?(?:\s+(?P<game_id>[^\s]+)(?:\s+(?P<friend_code>[^\s]+))?)?$"
     
     # 身高类型分类
     HEIGHT_TYPES = {
