@@ -371,74 +371,75 @@ class HelpCommand(BaseCommand):
         calendar_enabled = self.get_config("settings.enable_calendar_query", True)
         redstone_enabled = self.get_config("settings.enable_redstone_query", True)
         skytest_enabled = self.get_config("settings.enable_skytest_query", True)
+        command_prefix = self.get_config("plugin.command_prefix", "#")
         
         help_lines = ["✨ 光遇工具插件使用说明 ✨", "", "📋 可用命令:"]
         
         if height_enabled:
             help_lines.extend([
-                "📏 #height <游戏长ID> [好友码]",
+                f"📏 {command_prefix}height <游戏长ID> [好友码]",
                 "   → 查询光遇角色身高数据",
                 ""
             ])
         
         if task_enabled:
             help_lines.extend([
-                "🖼️ #task 或 #rw 或 #任务 或 #每日任务",
+                f"🖼️ {command_prefix}task 或 {command_prefix}rw 或 {command_prefix}任务 或 {command_prefix}每日任务",
                 "   → 获取每日任务图片",
                 ""
             ])
         
         if candle_enabled:
             help_lines.extend([
-                "🕯️ #candle 或 #dl 或 #大蜡 或 #大蜡烛",
+                f"🕯️ {command_prefix}candle 或 {command_prefix}dl 或 {command_prefix}大蜡 或 {command_prefix}大蜡烛",
                 "   → 获取大蜡烛位置图片",
                 ""
             ])
         
         if ancestor_enabled:
             help_lines.extend([
-                "👴 #ancestor 或 #fk 或 #复刻 或 #复刻先祖",
+                f"👴 {command_prefix}ancestor 或 {command_prefix}fk 或 {command_prefix}复刻 或 {command_prefix}复刻先祖",
                 "   → 获取复刻先祖位置",
                 ""
             ])
         
         if magic_enabled:
             help_lines.extend([
-                "🔮 #magic 或 #mf 或 #魔法 或 #每日魔法",
+                f"🔮 {command_prefix}magic 或 {command_prefix}mf 或 {command_prefix}魔法 或 {command_prefix}每日魔法",
                 "   → 获取每日魔法图片",
                 ""
             ])
         
         if season_candle_enabled:
             help_lines.extend([
-                "🕯️ #scandel 或 #jl 或 #季蜡 或 #季节蜡烛 或 #季蜡位置",
+                f"🕯️ {command_prefix}scandel 或 {command_prefix}jl 或 {command_prefix}季蜡 或 {command_prefix}季节蜡烛 或 {command_prefix}季蜡位置",
                 "   → 获取每日季蜡位置图片",
                 ""
             ])
         
         if calendar_enabled:
             help_lines.extend([
-                "📅 #calendar 或 #rl 或 #日历 或 #活动日历",
+                f"📅 {command_prefix}calendar 或 {command_prefix}rl 或 {command_prefix}日历 或 {command_prefix}活动日历",
                 "   → 获取光遇日历图片",
                 ""
             ])
         
         if redstone_enabled:
             help_lines.extend([
-                "🔴 #redstone 或 #hs 或 #红石 或 #红石位置",
+                f"🔴 {command_prefix}redstone 或 {command_prefix}hs 或 {command_prefix}红石 或 {command_prefix}红石位置",
                 "   → 获取红石位置图片",
                 ""
             ])
         
         if skytest_enabled:
             help_lines.extend([
-                "🔍 #skytest",
+                f"🔍 {command_prefix}skytest",
                 "   → 查看光遇服务器状态(是否炸服)",
                 ""
             ])
         
         help_lines.extend([
-            "ℹ️ #skytools",
+            f"ℹ️ {command_prefix}skytools",
             "   → 显示本帮助信息",
             "",
             "💡 提示: 部分功能可能已被管理员禁用"
