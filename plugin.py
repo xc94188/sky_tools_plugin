@@ -18,20 +18,345 @@ import os
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import threading
+from src.plugin_system.apis import config_api
+import requests
 
 logger = get_logger('sky_tools_plugin')
+
+class MessageForwardHelper:
+    """合并转发消息助手"""
+    
+    @staticmethod
+    async def send_forward_message(command_instance, messages: List[str], images: List[str] = None) -> bool:
+        """发送合并转发消息
+        
+        Args:
+            command_instance: BaseCommand实例
+            messages: 文本消息列表
+            images: 图片base64数据列表
+            
+        Returns:
+            bool: 发送是否成功
+        """
+        try:
+            # 添加：获取napcat配置
+            napcat_enabled = command_instance.get_config("napcat.enabled", True)
+            if not napcat_enabled:
+                logger.info("合并转发功能已禁用，使用直接发送")
+                return await MessageForwardHelper._fallback_send(command_instance, messages, images)
+            
+            api_url = command_instance.get_config("napcat.api_url", "http://127.0.0.1:5222")
+            api_token = command_instance.get_config("napcat.token", "")
+            timeout = command_instance.get_config("napcat.timeout", 30)
+            
+            logger.info(f"Napcat配置: 地址={api_url}, 启用={napcat_enabled}, 超时={timeout}秒")
+            
+            # 获取bot QQ号
+            bot_qq = None
+            bot_nickname = None
+            try:
+                bot_qq = str(config_api.get_global_config("bot.qq_account", ""))
+                # 从配置获取机器人昵称
+                bot_nickname = str(config_api.get_global_config("bot.nickname", "麦麦"))
+                logger.info(f"获取到bot配置: QQ={bot_qq}, nickname={bot_nickname}")
+            except Exception as e:
+                logger.error(f"获取bot配置失败: {str(e)}")
+            
+            # 检查是否是有效的QQ号
+            is_valid_qq = bot_qq and bot_qq != "1145141919810" and bot_qq.isdigit()
+            
+            if not is_valid_qq:
+                logger.warning(f"❌ 无法获取有效bot QQ号(当前值: {bot_qq})，回退到直接消息发送")
+                return await MessageForwardHelper._fallback_send(command_instance, messages, images)
+            
+            # 如果没有获取到nickname，使用默认值
+            if not bot_nickname:
+                bot_nickname = "麦麦"
+                logger.warning("使用默认昵称: 麦麦")
+            
+            # 关键：从message属性获取聊天信息
+            if not hasattr(command_instance, 'message'):
+                logger.error("❌ command_instance没有message属性，无法确定发送目标")
+                return await MessageForwardHelper._fallback_send(command_instance, messages, images)
+            
+            message_obj = command_instance.message
+            
+            # 构建合并转发消息的节点列表
+            nodes = []
+            
+            # 添加文本消息
+            for msg in messages:
+                if msg:
+                    node = {
+                        "type": "node",
+                        "data": {
+                            "user_id": int(bot_qq),
+                            "nickname": bot_nickname,
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "data": {"text": msg}
+                                }
+                            ]
+                        }
+                    }
+                    nodes.append(node)
+            
+            # 添加图片消息
+            if images:
+                for img_base64 in images:
+                    if img_base64:
+                        # 转换为base64 URL格式
+                        if not img_base64.startswith('data:'):
+                            img_base64 = f"data:image/png;base64,{img_base64}"
+                        
+                        node = {
+                            "type": "node",
+                            "data": {
+                                "user_id": int(bot_qq),
+                                "nickname": bot_nickname,
+                                "content": [
+                                    {
+                                        "type": "image",
+                                        "data": {
+                                            "file": img_base64,
+                                            "summary": "[图片]"
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                        nodes.append(node)
+            
+            if not nodes:
+                logger.warning("没有消息需要发送")
+                return False
+            
+            # 计算总消息条数
+            total_messages = len(messages) + (len(images) if images else 0)
+            
+            # 构建请求数据 - 按照你的要求修改
+            forward_data = {
+                "messages": nodes,
+                "news": [{"text": f"{bot_nickname}:{messages[0][:50]}" if messages else f"{bot_nickname}:图片消息"}],
+                "prompt": "群聊的聊天记录",  # 外显
+                "summary": f"查看{total_messages}条转发消息",  # 底下文本
+                "source": "群聊的聊天记录"  # 内容
+            }
+            
+            # 关键修改：从chat_stream获取stream_id，然后确定聊天类型
+            chat_stream = message_obj.chat_stream
+            
+            # 从chat_stream获取stream_id
+            stream_id = None
+            if hasattr(chat_stream, 'stream_id'):
+                stream_id = chat_stream.stream_id
+                logger.info(f"✅ 从chat_stream.stream_id获取: {stream_id}")
+            elif hasattr(chat_stream, 'chat_id'):
+                stream_id = chat_stream.chat_id
+                logger.info(f"✅ 从chat_stream.chat_id获取: {stream_id}")
+            
+            if not stream_id:
+                logger.error("❌ 无法从chat_stream获取stream_id")
+                return await MessageForwardHelper._fallback_send(command_instance, messages, images)
+            
+            # 使用chat_api确定聊天类型
+            try:
+                from src.plugin_system.apis import chat_api
+                
+                # 获取聊天流信息
+                stream_info = chat_api.get_stream_info(chat_stream)
+                
+                if stream_info.get("type") == "group":
+                    forward_data["group_id"] = stream_info.get("group_id")
+                    logger.info(f"✅ 确定是群聊，group_id: {forward_data['group_id']}")
+                    
+                    # 如果是群聊，更新source和news
+                    group_name = stream_info.get("group_name", "群聊")
+                    forward_data["source"] = f"{group_name}的聊天记录"
+                    
+                    # 获取第一条消息内容作为news显示
+                    if messages:
+                        first_msg = messages[0].replace('\n', ' ').strip()
+                        if len(first_msg) > 50:
+                            first_msg = first_msg[:47] + "..."
+                        forward_data["news"] = [{"text": f"{bot_nickname}:{first_msg}"}]
+                    
+                elif stream_info.get("type") == "private":
+                    # 对于私聊，需要获取用户ID
+                    user_id = stream_info.get("user_id")
+                    if user_id:
+                        forward_data["user_id"] = user_id
+                        logger.info(f"✅ 确定是私聊，user_id: {user_id}")
+                        
+                        # 如果是私聊，更新source和news
+                        user_name = stream_info.get("user_name", "用户")
+                        forward_data["source"] = f"{user_name}的聊天记录"
+                        
+                        # 获取第一条消息内容作为news显示
+                        if messages:
+                            first_msg = messages[0].replace('\n', ' ').strip()
+                            if len(first_msg) > 50:
+                                first_msg = first_msg[:47] + "..."
+                            forward_data["news"] = [{"text": f"{bot_nickname}:{first_msg}"}]
+                    else:
+                        # 如果chat_api没有返回user_id，尝试从message_info获取
+                        if hasattr(message_obj, 'message_info') and hasattr(message_obj.message_info, 'user_info'):
+                            user_info = message_obj.message_info.user_info
+                            if hasattr(user_info, 'user_id'):
+                                forward_data["user_id"] = user_info.user_id
+                                logger.info(f"✅ 从message_info获取私聊用户ID: {user_info.user_id}")
+                                
+                                # 尝试获取用户名
+                                user_name = "用户"
+                                if hasattr(user_info, 'user_nickname') and user_info.user_nickname:
+                                    user_name = user_info.user_nickname
+                                elif hasattr(user_info, 'user_cardname') and user_info.user_cardname:
+                                    user_name = user_info.user_cardname
+                                
+                                forward_data["source"] = f"{user_name}的聊天记录"
+                else:
+                    logger.warning(f"未知聊天类型: {stream_info.get('type')}")
+                    
+            except Exception as e:
+                logger.error(f"使用chat_api失败: {str(e)}")
+                # 回退方案：根据group_info是否为None判断
+                if hasattr(message_obj, 'message_info'):
+                    message_info = message_obj.message_info
+                    if hasattr(message_info, 'group_info') and message_info.group_info is not None:
+                        # 群聊
+                        if hasattr(message_info.group_info, 'group_id'):
+                            forward_data["group_id"] = message_info.group_info.group_id
+                            logger.info(f"✅ 从group_info获取群聊ID: {message_info.group_info.group_id}")
+                            
+                            # 尝试获取群名
+                            group_name = "群聊"
+                            if hasattr(message_info.group_info, 'group_name') and message_info.group_info.group_name:
+                                group_name = message_info.group_info.group_name
+                            forward_data["source"] = f"{group_name}的聊天记录"
+                    else:
+                        # 私聊，使用发送者的user_id
+                        if hasattr(message_info, 'user_info') and hasattr(message_info.user_info, 'user_id'):
+                            forward_data["user_id"] = message_info.user_info.user_id
+                            logger.info(f"✅ 从user_info获取私聊用户ID: {message_info.user_info.user_id}")
+                            
+                            # 尝试获取用户名
+                            user_name = "用户"
+                            if hasattr(message_info.user_info, 'user_nickname') and message_info.user_info.user_nickname:
+                                user_name = message_info.user_info.user_nickname
+                            elif hasattr(message_info.user_info, 'user_cardname') and message_info.user_info.user_cardname:
+                                user_name = message_info.user_info.user_cardname
+                            
+                            forward_data["source"] = f"{user_name}的聊天记录"
+            
+            # 确保至少指定了group_id或user_id之一
+            if "group_id" not in forward_data and "user_id" not in forward_data:
+                logger.error("❌ 最终无法确定发送目标")
+                return await MessageForwardHelper._fallback_send(command_instance, messages, images)
+            
+            target = forward_data.get('group_id', forward_data.get('user_id'))
+            chat_type = "群聊" if "group_id" in forward_data else "私聊"
+            
+            # 最终确认news内容
+            if messages:
+                first_msg = messages[0].replace('\n', ' ').strip()
+                if len(first_msg) > 50:
+                    first_msg = first_msg[:47] + "..."
+                forward_data["news"] = [{"text": f"{bot_nickname}:{first_msg}"}]
+            elif images:
+                forward_data["news"] = [{"text": f"{bot_nickname}:[图片]"}]
+            
+            logger.info(f"🎯 发送合并转发消息:")
+            logger.info(f"  目标: {target} ({chat_type})")
+            logger.info(f"  source: {forward_data['source']}")
+            logger.info(f"  prompt: {forward_data['prompt']}")
+            logger.info(f"  summary: {forward_data['summary']}")
+            logger.info(f"  news: {forward_data['news']}")
+            logger.info(f"  消息条数: {total_messages}")
+            
+            # 修改：使用配置的API地址和参数
+            # 构建请求头
+            headers = {"Content-Type": "application/json"}
+            if api_token:
+                headers["Authorization"] = f"Bearer {api_token}"
+                logger.info("使用API令牌进行认证")
+            
+            # 构建完整的API地址
+            full_api_url = f"{api_url.rstrip('/')}/send_forward_msg"
+            logger.info(f"发送请求到: {full_api_url}")
+            
+            # 调用napcatapi发送合并转发消息
+            response = requests.post(
+                full_api_url,
+                json=forward_data,
+                headers=headers,
+                timeout=timeout
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("status") == "ok":
+                    logger.info(f"✅ 合并转发消息发送成功")
+                    return True
+                else:
+                    logger.error(f"❌ 合并转发失败: {result}")
+            else:
+                logger.error(f"❌ HTTP请求失败: {response.status_code}")
+            
+            # 失败时回退到普通发送
+            logger.warning("合并转发失败，回退到直接消息发送")
+            return await MessageForwardHelper._fallback_send(command_instance, messages, images)
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ 网络请求异常: {str(e)}")
+            # 网络异常时回退到直接发送
+            return await MessageForwardHelper._fallback_send(command_instance, messages, images)
+        except Exception as e:
+            logger.error(f"❌ 发送合并转发消息失败: {str(e)}")
+            # 其他异常时回退到直接发送
+            return await MessageForwardHelper._fallback_send(command_instance, messages, images)
+    
+    @staticmethod
+    async def _fallback_send(command_instance, messages: List[str], images: List[str] = None) -> bool:
+        """回退到直接发送消息"""
+        logger.warning("⚠️ 使用回退方案：直接发送消息")
+        success_count = 0
+        
+        # 发送文本消息
+        for msg in messages:
+            if msg:
+                try:
+                    await command_instance.send_text(msg)
+                    success_count += 1
+                    logger.debug(f"直接发送文本消息: {msg[:50]}...")
+                except Exception as e:
+                    logger.error(f"直接发送文本消息失败: {str(e)}")
+        
+        # 发送图片消息
+        if images:
+            for img_base64 in images:
+                if img_base64:
+                    try:
+                        await command_instance.send_image(img_base64)
+                        success_count += 1
+                        logger.debug("直接发送图片消息")
+                    except Exception as e:
+                        logger.error(f"直接发送图片消息失败: {str(e)}")
+        
+        logger.info(f"回退方案完成，成功发送 {success_count} 条消息")
+        return success_count > 0
 
 class HelpCommand(BaseCommand):
     """光遇工具帮助命令"""
     
     command_name = "skytools"
     command_description = "查看光遇工具插件所有功能"
-    command_pattern = r"^/skytools$"
+    command_pattern = r"^{escaped_prefix}skytools$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """显示帮助信息"""
         help_text = self._get_help_text()
-        await self.send_text(help_text)
+        await MessageForwardHelper.send_forward_message(self, [help_text])
         return True, "显示帮助信息", True
     
     def _get_help_text(self) -> str:
@@ -51,69 +376,69 @@ class HelpCommand(BaseCommand):
         
         if height_enabled:
             help_lines.extend([
-                "📏 /height <游戏长ID> [好友码]",
+                "📏 #height <游戏长ID> [好友码]",
                 "   → 查询光遇角色身高数据",
                 ""
             ])
         
         if task_enabled:
             help_lines.extend([
-                "🖼️ /task 或 /rw 或 /任务 或 /每日任务",
+                "🖼️ #task 或 #rw 或 #任务 或 #每日任务",
                 "   → 获取每日任务图片",
                 ""
             ])
         
         if candle_enabled:
             help_lines.extend([
-                "🕯️ /candle 或 /dl 或 /大蜡 或 /大蜡烛",
+                "🕯️ #candle 或 #dl 或 #大蜡 或 #大蜡烛",
                 "   → 获取大蜡烛位置图片",
                 ""
             ])
         
         if ancestor_enabled:
             help_lines.extend([
-                "👴 /ancestor 或 /fk 或 /复刻 或 /复刻先祖",
+                "👴 #ancestor 或 #fk 或 #复刻 或 #复刻先祖",
                 "   → 获取复刻先祖位置",
                 ""
             ])
         
         if magic_enabled:
             help_lines.extend([
-                "🔮 /magic 或 /mf 或 /魔法 或 /每日魔法",
+                "🔮 #magic 或 #mf 或 #魔法 或 #每日魔法",
                 "   → 获取每日魔法图片",
                 ""
             ])
         
         if season_candle_enabled:
             help_lines.extend([
-                "🕯️ /scandel 或 /jl 或 /季蜡 或 /季节蜡烛 或 /季蜡位置",
+                "🕯️ #scandel 或 #jl 或 #季蜡 或 #季节蜡烛 或 #季蜡位置",
                 "   → 获取每日季蜡位置图片",
                 ""
             ])
         
         if calendar_enabled:
             help_lines.extend([
-                "📅 /calendar 或 /rl 或 /日历 或 /活动日历",
+                "📅 #calendar 或 #rl 或 #日历 或 #活动日历",
                 "   → 获取光遇日历图片",
                 ""
             ])
         
         if redstone_enabled:
             help_lines.extend([
-                "🔴 /redstone 或 /hs 或 /红石 或 /红石位置",
+                "🔴 #redstone 或 #hs 或 #红石 或 #红石位置",
                 "   → 获取红石位置图片",
                 ""
             ])
         
         if skytest_enabled:
             help_lines.extend([
-                "🔍 /skytest",
+                "🔍 #skytest",
                 "   → 查看光遇服务器状态(是否炸服)",
                 ""
             ])
         
         help_lines.extend([
-            "ℹ️ /skytools",
+            "ℹ️ #skytools",
             "   → 显示本帮助信息",
             "",
             "💡 提示: 部分功能可能已被管理员禁用"
@@ -126,7 +451,7 @@ class HeightQueryCommand(BaseCommand):
     
     command_name = "height"
     command_description = "查询光遇国服玩家身高数据"
-    command_pattern = r"^/(?:height|身高)(?:\s+(?P<platform>\w+))?(?:\s+(?P<game_id>[^\s]+)(?:\s+(?P<friend_code>[^\s]+))?)?$"
+    command_pattern = r"^{escaped_prefix}(?:height|身高)(?:\s+(?P<platform>\w+))?(?:\s+(?P<game_id>[^\s]+)(?:\s+(?P<friend_code>[^\s]+))?)?$"
     
     # 身高类型分类
     HEIGHT_TYPES = {
@@ -152,7 +477,7 @@ class HeightQueryCommand(BaseCommand):
             # 处理帮助命令
             if not game_id or game_id.lower() == "help":
                 help_text = self._get_help_text()
-                await self.send_text(help_text)
+                await MessageForwardHelper.send_forward_message(self, [help_text])
                 return True, "显示帮助信息", True
             
             # 检查是否有启用的平台
@@ -170,13 +495,13 @@ class HeightQueryCommand(BaseCommand):
             # 验证参数格式
             validation_result = self._validate_parameters(query_platform, game_id, friend_code)
             if not validation_result["success"]:
-                await self.send_text(validation_result["message"])
+                await MessageForwardHelper.send_forward_message(self, [validation_result["message"]])
                 return False, validation_result["error"], True
             
             # 获取平台配置
             platform_config = self._get_platform_config(query_platform)
             if not platform_config:
-                await self.send_text(f"❌ 插件未配置{query_platform}平台API密钥")
+                await MessageForwardHelper.send_forward_message(self, [f"❌ 插件未配置{query_platform}平台API密钥"])
                 return False, f"{query_platform}平台API密钥未配置", True
             
             # 调用平台处理器
@@ -190,17 +515,17 @@ class HeightQueryCommand(BaseCommand):
             )
             
             if result["success"]:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return True, "身高查询成功", True
             else:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return False, result.get("error", "身高查询失败"), True
                 
         except asyncio.TimeoutError:
             await self.send_text("❌ 查询超时")
             return False, "API请求超时", True
         except Exception as e:
-            await self.send_text(f"❌ 查询错误: {str(e)}")
+            await MessageForwardHelper.send_forward_message(self, [f"❌ 查询错误: {str(e)}"])
             return False, f"查询错误: {str(e)}", True
     
     def _validate_parameters(self, platform: str, game_id: str, friend_code: Optional[str]) -> Dict[str, Any]:
@@ -279,10 +604,10 @@ class HeightQueryCommand(BaseCommand):
             "使用方法（两种格式）:",
             "",
             f"1. 使用默认平台(当前默认:{default_platform}):",
-            "   /height <游戏长ID> [好友码]",
+            "   #height <游戏长ID> [好友码]",
             "",
             "2. 指定平台:",
-            "   /height <平台名> <游戏长ID> [好友码]",
+            "   #height <平台名> <游戏长ID> [好友码]",
             "",
             "参数说明:",
             "• 平台名: 支持以下平台和别名",
@@ -319,24 +644,24 @@ class HeightQueryCommand(BaseCommand):
         if "mango" in enabled_platforms:
             help_text.extend([
                 "芒果平台:",
-                "/height mango xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-                "/height mg xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx XXXX-XXXX-XXXX",
+                "#height mango xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+                "#height mg xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx XXXX-XXXX-XXXX",
                 ""
             ])
         
         if "ovoav" in enabled_platforms:
             help_text.extend([
                 "独角兽平台:",
-                "/height ovoav xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-                "/height djs XXXX-XXXX-XXXX",
+                "#height ovoav xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+                "#height djs XXXX-XXXX-XXXX",
                 ""
             ])
         
         if "yingtian" in enabled_platforms:
             help_text.extend([
                 "应天平台:",
-                "/height yingtian xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-                "/height yt xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx XXXX-XXXX-XXXX",
+                "#height yingtian xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+                "#height yt xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx XXXX-XXXX-XXXX",
                 ""
             ])
         
@@ -918,7 +1243,7 @@ class TaskQueryCommand(BaseCommand):
 
     command_name = "task"
     command_description = "获取光遇任务图片"
-    command_pattern = r"^/(?:task|rw|任务|每日任务)$"
+    command_pattern = r"^{escaped_prefix}(?:task|rw|任务|每日任务)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行任务图片查询命令"""
@@ -950,7 +1275,7 @@ class TaskQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await self.send_image(image_base64)
+                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
                     if success:
                         return True, "任务图片发送成功", True
                     else:
@@ -960,14 +1285,14 @@ class TaskQueryCommand(BaseCommand):
                     await self.send_text("❌ 图片数据为空")
                     return False, "图片数据为空", True
             else:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return False, result.get("error", "获取任务图片失败"), True
                 
         except asyncio.TimeoutError:
             await self.send_text("❌ 获取超时")
             return False, "API请求超时", True
         except Exception as e:
-            await self.send_text(f"❌ 获取错误: {str(e)}")
+            await MessageForwardHelper.send_forward_message(self, [f"❌ 获取错误: {str(e)}"])
             return False, f"获取任务图片错误: {str(e)}", True
     
     async def _get_task_image(self, url: str, key: str, timeout: int) -> Dict[str, Any]:
@@ -1057,7 +1382,7 @@ class CandleQueryCommand(BaseCommand):
 
     command_name = "candle"
     command_description = "获取光遇大蜡烛位置图片"
-    command_pattern = r"^/(?:candle|dl|大蜡|大蜡烛)$"
+    command_pattern = r"^{escaped_prefix}(?:candle|dl|大蜡|大蜡烛)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行大蜡烛位置查询命令"""
@@ -1089,7 +1414,7 @@ class CandleQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await self.send_image(image_base64)
+                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
                     if success:
                         return True, "大蜡烛位置发送成功", True
                     else:
@@ -1099,14 +1424,14 @@ class CandleQueryCommand(BaseCommand):
                     await self.send_text("❌ 图片数据为空")
                     return False, "图片数据为空", True
             else:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return False, result.get("error", "获取大蜡烛位置失败"), True
                 
         except asyncio.TimeoutError:
             await self.send_text("❌ 获取超时")
             return False, "API请求超时", True
         except Exception as e:
-            await self.send_text(f"❌ 获取错误: {str(e)}")
+            await MessageForwardHelper.send_forward_message(self, [f"❌ 获取错误: {str(e)}"])
             return False, f"获取大蜡烛位置错误: {str(e)}", True
     
     async def _get_candle_image(self, url: str, key: str, timeout: int) -> Dict[str, Any]:
@@ -1196,7 +1521,7 @@ class AncestorQueryCommand(BaseCommand):
 
     command_name = "ancestor"
     command_description = "获取光遇复刻先祖位置图片"
-    command_pattern = r"^/(?:ancestor|fk|复刻|先祖|复刻先祖)$"
+    command_pattern = r"^{escaped_prefix}(?:ancestor|fk|复刻|先祖|复刻先祖)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行复刻先祖位置查询命令"""
@@ -1221,12 +1546,12 @@ class AncestorQueryCommand(BaseCommand):
             
             if result["success"]:
                 if result["image_data"]:
-                    success = await self.send_image(result["image_data"])
+                    success = await MessageForwardHelper.send_forward_message(self, [], [result["image_data"]])
                     if success:
                         # 发送文字信息
                         text_info = result.get("text_info", "")
                         if text_info:
-                            await self.send_text(text_info)
+                            await MessageForwardHelper.send_forward_message(self, [text_info])
                         return True, "复刻先祖信息发送成功", True
                     else:
                         await self.send_text("❌ 发送图片失败")
@@ -1235,11 +1560,11 @@ class AncestorQueryCommand(BaseCommand):
                     await self.send_text("❌ 未找到复刻先祖图片")
                     return False, "未找到复刻先祖图片", True
             else:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return False, result.get("error", "获取复刻先祖信息失败"), True
                 
         except Exception as e:
-            await self.send_text(f"❌ 获取错误: {str(e)}")
+            await MessageForwardHelper.send_forward_message(self, [f"❌ 获取错误: {str(e)}"])
             return False, f"获取复刻先祖信息错误: {str(e)}", True
     
     async def _get_ancestor_info(self, url: str, key: str, timeout: int) -> Dict[str, Any]:
@@ -1352,7 +1677,7 @@ class MagicQueryCommand(BaseCommand):
 
     command_name = "magic"
     command_description = "获取光遇每日魔法图片"
-    command_pattern = r"^/(?:magic|mf|魔法|每日魔法)$"
+    command_pattern = r"^{escaped_prefix}(?:magic|mf|魔法|每日魔法)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行每日魔法查询命令"""
@@ -1384,7 +1709,7 @@ class MagicQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await self.send_image(image_base64)
+                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
                     if success:
                         return True, "每日魔法发送成功", True
                     else:
@@ -1394,11 +1719,11 @@ class MagicQueryCommand(BaseCommand):
                     await self.send_text("❌ 图片数据为空")
                     return False, "图片数据为空", True
             else:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return False, result.get("error", "获取每日魔法失败"), True
                 
         except Exception as e:
-            await self.send_text(f"❌ 获取错误: {str(e)}")
+            await MessageForwardHelper.send_forward_message(self, [f"❌ 获取错误: {str(e)}"])
             return False, f"获取每日魔法错误: {str(e)}", True
     
     async def _get_magic_image(self, url: str, key: str, timeout: int) -> Dict[str, Any]:
@@ -1442,7 +1767,7 @@ class SeasonCandleQueryCommand(BaseCommand):
 
     command_name = "season_candle"
     command_description = "获取光遇每日季蜡位置图片"
-    command_pattern = r"^/(?:scandel|jl|季蜡|季节蜡烛|季蜡位置)$"
+    command_pattern = r"^{escaped_prefix}(?:scandel|jl|季蜡|季节蜡烛|季蜡位置)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行每日季蜡位置查询命令"""
@@ -1474,7 +1799,7 @@ class SeasonCandleQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await self.send_image(image_base64)
+                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
                     if success:
                         return True, "季蜡位置发送成功", True
                     else:
@@ -1484,11 +1809,11 @@ class SeasonCandleQueryCommand(BaseCommand):
                     await self.send_text("❌ 图片数据为空")
                     return False, "图片数据为空", True
             else:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return False, result.get("error", "获取季蜡位置失败"), True
                 
         except Exception as e:
-            await self.send_text(f"❌ 获取错误: {str(e)}")
+            await MessageForwardHelper.send_forward_message(self, [f"❌ 获取错误: {str(e)}"])
             return False, f"获取季蜡位置错误: {str(e)}", True
     
     async def _get_season_candle_image(self, url: str, key: str, timeout: int) -> Dict[str, Any]:
@@ -1532,7 +1857,7 @@ class CalendarQueryCommand(BaseCommand):
 
     command_name = "calendar"
     command_description = "获取光遇日历图片"
-    command_pattern = r"^/(?:calendar|rl|日历|活动日历)$"
+    command_pattern = r"^{escaped_prefix}(?:calendar|rl|日历|活动日历)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行光遇日历查询命令"""
@@ -1564,7 +1889,7 @@ class CalendarQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await self.send_image(image_base64)
+                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
                     if success:
                         return True, "光遇日历发送成功", True
                     else:
@@ -1574,11 +1899,11 @@ class CalendarQueryCommand(BaseCommand):
                     await self.send_text("❌ 图片数据为空")
                     return False, "图片数据为空", True
             else:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return False, result.get("error", "获取光遇日历失败"), True
                 
         except Exception as e:
-            await self.send_text(f"❌ 获取错误: {str(e)}")
+            await MessageForwardHelper.send_forward_message(self, [f"❌ 获取错误: {str(e)}"])
             return False, f"获取光遇日历错误: {str(e)}", True
     
     async def _get_calendar_image(self, url: str, key: str, timeout: int) -> Dict[str, Any]:
@@ -1622,7 +1947,7 @@ class RedStoneQueryCommand(BaseCommand):
 
     command_name = "redstone"
     command_description = "获取光遇红石位置图片"
-    command_pattern = r"^/(?:redstone|hs|红石|红石位置)$"
+    command_pattern = r"^{escaped_prefix}(?:redstone|hs|红石|红石位置)$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行红石位置查询命令"""
@@ -1654,7 +1979,7 @@ class RedStoneQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await self.send_image(image_base64)
+                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
                     if success:
                         return True, "红石位置发送成功", True
                     else:
@@ -1664,11 +1989,11 @@ class RedStoneQueryCommand(BaseCommand):
                     await self.send_text("❌ 图片数据为空")
                     return False, "图片数据为空", True
             else:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return False, result.get("error", "获取红石位置失败"), True
                 
         except Exception as e:
-            await self.send_text(f"❌ 获取错误: {str(e)}")
+            await MessageForwardHelper.send_forward_message(self, [f"❌ 获取错误: {str(e)}"])
             return False, f"获取红石位置错误: {str(e)}", True
     
     async def _get_redstone_image(self, url: str, key: str, timeout: int) -> Dict[str, Any]:
@@ -1711,7 +2036,7 @@ class SkyTestCommand(BaseCommand):
 
     command_name = "skytest"
     command_description = "查询光遇服务器状态"
-    command_pattern = r"^/skytest$"
+    command_pattern = r"^{escaped_prefix}skytest$"
     
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行服务器状态查询命令"""
@@ -1730,19 +2055,19 @@ class SkyTestCommand(BaseCommand):
                 await self.send_text("❌ 插件未配置服务器状态API密钥")
                 return False, "服务器状态API密钥未配置", True
             
-            # await self.send_text("🔄 正在查询服务器状态...")
+            # await MessageForwardHelper.send_forward_message(self, ["🔄 正在查询服务器状态..."])
             
             result = await self._get_server_status(skytest_url, skytest_key, timeout)
             
             if result["success"]:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return True, "服务器状态查询成功", True
             else:
-                await self.send_text(result["message"])
+                await MessageForwardHelper.send_forward_message(self, [result["message"]])
                 return False, result.get("error", "服务器状态查询失败"), True
                 
         except Exception as e:
-            await self.send_text(f"❌ 查询错误: {str(e)}")
+            await MessageForwardHelper.send_forward_message(self, [f"❌ 查询错误: {str(e)}"])
             return False, f"服务器状态查询错误: {str(e)}", True
     
     async def _get_server_status(self, url: str, key: str, timeout: int) -> Dict[str, Any]:
@@ -2229,6 +2554,7 @@ class SkyToolsPlugin(BasePlugin):
     
     config_section_descriptions = {
         "plugin": "插件基本配置",
+        "napcat": "Napcat API配置（用于合并转发消息）",
         "height_api": "身高查询API配置",
         "task_api": "任务图片API配置",
         "candle_api": "大蜡烛位置API配置",
@@ -2238,7 +2564,34 @@ class SkyToolsPlugin(BasePlugin):
     config_schema = {
         "plugin": {
             "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
-            "config_version": ConfigField(type=str, default="1.1.4", description="配置文件版本"),
+            "config_version": ConfigField(type=str, default="1.1.8", description="配置文件版本"),
+            "command_prefix": ConfigField(
+                type=str, 
+                default="#", 
+                description="命令前缀（注：修改命令前缀需要重启主程序才能更新，热重载无效）"
+            ),
+        },    
+        "napcat": {
+            "api_url": ConfigField(
+                type=str, 
+                default="http://127.0.0.1:5222", 
+                description="Napcat API地址，默认: http://127.0.0.1:5222"
+            ),
+            "token": ConfigField(
+                type=str, 
+                default="", 
+                description="Napcat API令牌（可选）"
+            ),
+            "timeout": ConfigField(
+                type=int, 
+                default=30, 
+                description="API请求超时时间（秒）"
+            ),
+            "enabled": ConfigField(
+                type=bool, 
+                default=True, 
+                description="是否启用合并转发消息功能"
+            )
         },
         "height_api": {
             "default_platform": ConfigField(
@@ -2551,6 +2904,22 @@ class SkyToolsPlugin(BasePlugin):
            
     def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
         """返回插件包含的组件列表"""
+        # 获取命令前缀并动态设置command_pattern
+        prefix = self.get_config("plugin.command_prefix", "#")
+        escaped_prefix = re.escape(prefix)
+        
+        # 动态替换每个命令的正则表达式
+        HelpCommand.command_pattern = HelpCommand.command_pattern.format(escaped_prefix=escaped_prefix)
+        HeightQueryCommand.command_pattern = HeightQueryCommand.command_pattern.format(escaped_prefix=escaped_prefix)
+        TaskQueryCommand.command_pattern = TaskQueryCommand.command_pattern.format(escaped_prefix=escaped_prefix)
+        CandleQueryCommand.command_pattern = CandleQueryCommand.command_pattern.format(escaped_prefix=escaped_prefix)
+        AncestorQueryCommand.command_pattern = AncestorQueryCommand.command_pattern.format(escaped_prefix=escaped_prefix)
+        MagicQueryCommand.command_pattern = MagicQueryCommand.command_pattern.format(escaped_prefix=escaped_prefix)
+        SeasonCandleQueryCommand.command_pattern = SeasonCandleQueryCommand.command_pattern.format(escaped_prefix=escaped_prefix)
+        CalendarQueryCommand.command_pattern = CalendarQueryCommand.command_pattern.format(escaped_prefix=escaped_prefix)
+        RedStoneQueryCommand.command_pattern = RedStoneQueryCommand.command_pattern.format(escaped_prefix=escaped_prefix)
+        SkyTestCommand.command_pattern = SkyTestCommand.command_pattern.format(escaped_prefix=escaped_prefix)
+        
         return [
             (HelpCommand.get_command_info(), HelpCommand),
             (HeightQueryCommand.get_command_info(), HeightQueryCommand),
