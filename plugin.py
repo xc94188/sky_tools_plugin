@@ -20,331 +20,9 @@ from watchdog.events import FileSystemEventHandler
 import threading
 from src.plugin_system.apis import config_api
 import requests
+from .message_forward_helper import MessageForwardHelper
 
 logger = get_logger('sky_tools_plugin')
-
-class MessageForwardHelper:
-    """合并转发消息助手"""
-    
-    @staticmethod
-    async def send_forward_message(command_instance, messages: List[str], images: List[str] = None) -> bool:
-        """发送合并转发消息
-        
-        Args:
-            command_instance: BaseCommand实例
-            messages: 文本消息列表
-            images: 图片base64数据列表
-            
-        Returns:
-            bool: 发送是否成功
-        """
-        try:
-            # 添加：获取napcat配置
-            napcat_enabled = command_instance.get_config("napcat.enabled", True)
-            if not napcat_enabled:
-                logger.info("合并转发功能已禁用，使用直接发送")
-                return await MessageForwardHelper._fallback_send(command_instance, messages, images)
-            
-            api_url = command_instance.get_config("napcat.api_url", "http://127.0.0.1:5222")
-            api_token = command_instance.get_config("napcat.token", "")
-            timeout = command_instance.get_config("napcat.timeout", 30)
-            
-            logger.info(f"Napcat配置: 地址={api_url}, 启用={napcat_enabled}, 超时={timeout}秒")
-            
-            # 获取bot QQ号
-            bot_qq = None
-            bot_nickname = None
-            try:
-                bot_qq = str(config_api.get_global_config("bot.qq_account", ""))
-                # 从配置获取机器人昵称
-                bot_nickname = str(config_api.get_global_config("bot.nickname", "麦麦"))
-                logger.info(f"获取到bot配置: QQ={bot_qq}, nickname={bot_nickname}")
-            except Exception as e:
-                logger.error(f"获取bot配置失败: {str(e)}")
-            
-            # 检查是否是有效的QQ号
-            is_valid_qq = bot_qq and bot_qq != "1145141919810" and bot_qq.isdigit()
-            
-            if not is_valid_qq:
-                logger.warning(f"❌ 无法获取有效bot QQ号(当前值: {bot_qq})，回退到直接消息发送")
-                return await MessageForwardHelper._fallback_send(command_instance, messages, images)
-            
-            # 如果没有获取到nickname，使用默认值
-            if not bot_nickname:
-                bot_nickname = "麦麦"
-                logger.warning("使用默认昵称: 麦麦")
-            
-            # 关键：从message属性获取聊天信息
-            if not hasattr(command_instance, 'message'):
-                logger.error("❌ command_instance没有message属性，无法确定发送目标")
-                return await MessageForwardHelper._fallback_send(command_instance, messages, images)
-            
-            message_obj = command_instance.message
-            
-            # 构建合并转发消息的节点列表
-            nodes = []
-            
-            # 添加文本消息
-            for msg in messages:
-                if msg:
-                    node = {
-                        "type": "node",
-                        "data": {
-                            "user_id": int(bot_qq),
-                            "nickname": bot_nickname,
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "data": {"text": msg}
-                                }
-                            ]
-                        }
-                    }
-                    nodes.append(node)
-            
-            # 添加图片消息
-            if images:
-                for img_base64 in images:
-                    if img_base64:
-                        # 转换为base64 URL格式
-                        if not img_base64.startswith('data:'):
-                            img_base64 = f"data:image/png;base64,{img_base64}"
-                        
-                        node = {
-                            "type": "node",
-                            "data": {
-                                "user_id": int(bot_qq),
-                                "nickname": bot_nickname,
-                                "content": [
-                                    {
-                                        "type": "image",
-                                        "data": {
-                                            "file": img_base64,
-                                            "summary": "[图片]"
-                                        }
-                                    }
-                                ]
-                            }
-                        }
-                        nodes.append(node)
-            
-            if not nodes:
-                logger.warning("没有消息需要发送")
-                return False
-            
-            # 计算总消息条数
-            total_messages = len(messages) + (len(images) if images else 0)
-            
-            # 构建请求数据 - 按照你的要求修改
-            forward_data = {
-                "messages": nodes,
-                "news": [{"text": f"{bot_nickname}:{messages[0][:50]}" if messages else f"{bot_nickname}:图片消息"}],
-                "prompt": "群聊的聊天记录",  # 外显
-                "summary": f"查看{total_messages}条转发消息",  # 底下文本
-                "source": "群聊的聊天记录"  # 内容
-            }
-            
-            # 关键修改：从chat_stream获取stream_id，然后确定聊天类型
-            chat_stream = message_obj.chat_stream
-            
-            # 从chat_stream获取stream_id
-            stream_id = None
-            if hasattr(chat_stream, 'stream_id'):
-                stream_id = chat_stream.stream_id
-                logger.info(f"✅ 从chat_stream.stream_id获取: {stream_id}")
-            elif hasattr(chat_stream, 'chat_id'):
-                stream_id = chat_stream.chat_id
-                logger.info(f"✅ 从chat_stream.chat_id获取: {stream_id}")
-            
-            if not stream_id:
-                logger.error("❌ 无法从chat_stream获取stream_id")
-                return await MessageForwardHelper._fallback_send(command_instance, messages, images)
-            
-            # 使用chat_api确定聊天类型
-            try:
-                from src.plugin_system.apis import chat_api
-                
-                # 获取聊天流信息
-                stream_info = chat_api.get_stream_info(chat_stream)
-                
-                if stream_info.get("type") == "group":
-                    forward_data["group_id"] = stream_info.get("group_id")
-                    logger.info(f"✅ 确定是群聊，group_id: {forward_data['group_id']}")
-                    
-                    # 如果是群聊，更新source和news
-                    group_name = stream_info.get("group_name", "群聊")
-                    forward_data["source"] = f"{group_name}的聊天记录"
-                    
-                    # 获取第一条消息内容作为news显示
-                    if messages:
-                        first_msg = messages[0].replace('\n', ' ').strip()
-                        if len(first_msg) > 50:
-                            first_msg = first_msg[:47] + "..."
-                        forward_data["news"] = [{"text": f"{bot_nickname}:{first_msg}"}]
-                    
-                elif stream_info.get("type") == "private":
-                    # 对于私聊，需要获取用户ID
-                    user_id = stream_info.get("user_id")
-                    if user_id:
-                        forward_data["user_id"] = user_id
-                        logger.info(f"✅ 确定是私聊，user_id: {user_id}")
-                        
-                        # 如果是私聊，更新source和news
-                        user_name = stream_info.get("user_name", "用户")
-                        forward_data["source"] = f"{user_name}的聊天记录"
-                        
-                        # 获取第一条消息内容作为news显示
-                        if messages:
-                            first_msg = messages[0].replace('\n', ' ').strip()
-                            if len(first_msg) > 50:
-                                first_msg = first_msg[:47] + "..."
-                            forward_data["news"] = [{"text": f"{bot_nickname}:{first_msg}"}]
-                    else:
-                        # 如果chat_api没有返回user_id，尝试从message_info获取
-                        if hasattr(message_obj, 'message_info') and hasattr(message_obj.message_info, 'user_info'):
-                            user_info = message_obj.message_info.user_info
-                            if hasattr(user_info, 'user_id'):
-                                forward_data["user_id"] = user_info.user_id
-                                logger.info(f"✅ 从message_info获取私聊用户ID: {user_info.user_id}")
-                                
-                                # 尝试获取用户名
-                                user_name = "用户"
-                                if hasattr(user_info, 'user_nickname') and user_info.user_nickname:
-                                    user_name = user_info.user_nickname
-                                elif hasattr(user_info, 'user_cardname') and user_info.user_cardname:
-                                    user_name = user_info.user_cardname
-                                
-                                forward_data["source"] = f"{user_name}的聊天记录"
-                else:
-                    logger.warning(f"未知聊天类型: {stream_info.get('type')}")
-                    
-            except Exception as e:
-                logger.error(f"使用chat_api失败: {str(e)}")
-                # 回退方案：根据group_info是否为None判断
-                if hasattr(message_obj, 'message_info'):
-                    message_info = message_obj.message_info
-                    if hasattr(message_info, 'group_info') and message_info.group_info is not None:
-                        # 群聊
-                        if hasattr(message_info.group_info, 'group_id'):
-                            forward_data["group_id"] = message_info.group_info.group_id
-                            logger.info(f"✅ 从group_info获取群聊ID: {message_info.group_info.group_id}")
-                            
-                            # 尝试获取群名
-                            group_name = "群聊"
-                            if hasattr(message_info.group_info, 'group_name') and message_info.group_info.group_name:
-                                group_name = message_info.group_info.group_name
-                            forward_data["source"] = f"{group_name}的聊天记录"
-                    else:
-                        # 私聊，使用发送者的user_id
-                        if hasattr(message_info, 'user_info') and hasattr(message_info.user_info, 'user_id'):
-                            forward_data["user_id"] = message_info.user_info.user_id
-                            logger.info(f"✅ 从user_info获取私聊用户ID: {message_info.user_info.user_id}")
-                            
-                            # 尝试获取用户名
-                            user_name = "用户"
-                            if hasattr(message_info.user_info, 'user_nickname') and message_info.user_info.user_nickname:
-                                user_name = message_info.user_info.user_nickname
-                            elif hasattr(message_info.user_info, 'user_cardname') and message_info.user_info.user_cardname:
-                                user_name = message_info.user_info.user_cardname
-                            
-                            forward_data["source"] = f"{user_name}的聊天记录"
-            
-            # 确保至少指定了group_id或user_id之一
-            if "group_id" not in forward_data and "user_id" not in forward_data:
-                logger.error("❌ 最终无法确定发送目标")
-                return await MessageForwardHelper._fallback_send(command_instance, messages, images)
-            
-            target = forward_data.get('group_id', forward_data.get('user_id'))
-            chat_type = "群聊" if "group_id" in forward_data else "私聊"
-            
-            # 最终确认news内容
-            if messages:
-                first_msg = messages[0].replace('\n', ' ').strip()
-                if len(first_msg) > 50:
-                    first_msg = first_msg[:47] + "..."
-                forward_data["news"] = [{"text": f"{bot_nickname}:{first_msg}"}]
-            elif images:
-                forward_data["news"] = [{"text": f"{bot_nickname}:[图片]"}]
-            
-            logger.info(f"🎯 发送合并转发消息:")
-            logger.info(f"  目标: {target} ({chat_type})")
-            logger.info(f"  source: {forward_data['source']}")
-            logger.info(f"  prompt: {forward_data['prompt']}")
-            logger.info(f"  summary: {forward_data['summary']}")
-            logger.info(f"  news: {forward_data['news']}")
-            logger.info(f"  消息条数: {total_messages}")
-            
-            # 修改：使用配置的API地址和参数
-            # 构建请求头
-            headers = {"Content-Type": "application/json"}
-            if api_token:
-                headers["Authorization"] = f"Bearer {api_token}"
-                logger.info("使用API令牌进行认证")
-            
-            # 构建完整的API地址
-            full_api_url = f"{api_url.rstrip('/')}/send_forward_msg"
-            logger.info(f"发送请求到: {full_api_url}")
-            
-            # 调用napcatapi发送合并转发消息
-            response = requests.post(
-                full_api_url,
-                json=forward_data,
-                headers=headers,
-                timeout=timeout
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("status") == "ok":
-                    logger.info(f"✅ 合并转发消息发送成功")
-                    return True
-                else:
-                    logger.error(f"❌ 合并转发失败: {result}")
-            else:
-                logger.error(f"❌ HTTP请求失败: {response.status_code}")
-            
-            # 失败时回退到普通发送
-            logger.warning("合并转发失败，回退到直接消息发送")
-            return await MessageForwardHelper._fallback_send(command_instance, messages, images)
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ 网络请求异常: {str(e)}")
-            # 网络异常时回退到直接发送
-            return await MessageForwardHelper._fallback_send(command_instance, messages, images)
-        except Exception as e:
-            logger.error(f"❌ 发送合并转发消息失败: {str(e)}")
-            # 其他异常时回退到直接发送
-            return await MessageForwardHelper._fallback_send(command_instance, messages, images)
-    
-    @staticmethod
-    async def _fallback_send(command_instance, messages: List[str], images: List[str] = None) -> bool:
-        """回退到直接发送消息"""
-        logger.warning("⚠️ 使用回退方案：直接发送消息")
-        success_count = 0
-        
-        # 发送文本消息
-        for msg in messages:
-            if msg:
-                try:
-                    await command_instance.send_text(msg)
-                    success_count += 1
-                    logger.debug(f"直接发送文本消息: {msg[:50]}...")
-                except Exception as e:
-                    logger.error(f"直接发送文本消息失败: {str(e)}")
-        
-        # 发送图片消息
-        if images:
-            for img_base64 in images:
-                if img_base64:
-                    try:
-                        await command_instance.send_image(img_base64)
-                        success_count += 1
-                        logger.debug("直接发送图片消息")
-                    except Exception as e:
-                        logger.error(f"直接发送图片消息失败: {str(e)}")
-        
-        logger.info(f"回退方案完成，成功发送 {success_count} 条消息")
-        return success_count > 0
 
 class HelpCommand(BaseCommand):
     """光遇工具帮助命令"""
@@ -1276,7 +954,7 @@ class TaskQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
+                    success = await MessageForwardHelper.send_forward_message(self, [image_base64])
                     if success:
                         return True, "任务图片发送成功", True
                     else:
@@ -1415,7 +1093,7 @@ class CandleQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
+                    success = await MessageForwardHelper.send_forward_message(self, [image_base64])
                     if success:
                         return True, "大蜡烛位置发送成功", True
                     else:
@@ -1710,7 +1388,7 @@ class MagicQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
+                    success = await MessageForwardHelper.send_forward_message(self, [image_base64])
                     if success:
                         return True, "每日魔法发送成功", True
                     else:
@@ -1800,7 +1478,7 @@ class SeasonCandleQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
+                    success = await MessageForwardHelper.send_forward_message(self, [image_base64])
                     if success:
                         return True, "季蜡位置发送成功", True
                     else:
@@ -1890,7 +1568,7 @@ class CalendarQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
+                    success = await MessageForwardHelper.send_forward_message(self, [image_base64])
                     if success:
                         return True, "光遇日历发送成功", True
                     else:
@@ -1980,7 +1658,7 @@ class RedStoneQueryCommand(BaseCommand):
                         if match:
                             image_base64 = match.group(1)
                     
-                    success = await MessageForwardHelper.send_forward_message(self, [], [image_base64])
+                    success = await MessageForwardHelper.send_forward_message(self, [image_base64])
                     if success:
                         return True, "红石位置发送成功", True
                     else:
@@ -2137,153 +1815,6 @@ class SkyTestCommand(BaseCommand):
                 return await response.text()
             except:
                 return f"状态码: {response.status}"
-
-# class ConfigMonitor:
-#     """安全的配置文件监控器 - 避免卡死主程序"""
-    
-#     def __init__(self, plugin):
-#         self.plugin = plugin
-#         self.is_running = False
-#         self.task = None
-#         self._reload_in_progress = False
-#         self.config_path = self._get_config_path()
-    
-#     async def start(self):
-#         """安全启动配置监控任务"""
-#         if self.is_running:
-#             return
-        
-#         self.is_running = True
-#         # 使用create_task而不是直接await，避免阻塞
-#         self.task = asyncio.create_task(self._safe_monitor_loop())
-#         logger.info("安全配置监控已启动")
-    
-#     async def stop(self):
-#         """安全停止配置监控任务"""
-#         if not self.is_running:
-#             return
-        
-#         self.is_running = False
-#         if self.task and not self.task.done():
-#             self.task.cancel()
-#             try:
-#                 # 设置超时，避免无限等待
-#                 await asyncio.wait_for(self.task, timeout=5.0)
-#             except (asyncio.CancelledError, asyncio.TimeoutError):
-#                 logger.warning("配置监控任务停止超时，强制取消")
-        
-#         logger.info("配置监控已安全停止")
-    
-#     async def _safe_monitor_loop(self):
-#         """安全的监控循环"""
-#         check_interval = 10  # 10秒检查一次
-        
-#         logger.info(f"开始安全监控配置文件，检查间隔: {check_interval}秒")
-        
-#         last_successful_check = time.time()
-        
-#         while self.is_running:
-#             try:
-#                 # 使用可中断的sleep
-#                 await asyncio.sleep(check_interval)
-                
-#                 # 检查是否过于频繁
-#                 if time.time() - last_successful_check < check_interval:
-#                     continue
-                
-#                 # 执行安全检查
-#                 await self._safe_check_config()
-#                 last_successful_check = time.time()
-                
-#             except asyncio.CancelledError:
-#                 break
-#             except Exception as e:
-#                 logger.error(f"配置监控出错，等待恢复: {str(e)}")
-#                 # 出错后延长等待时间
-#                 await asyncio.sleep(60)
-    
-#     async def _safe_check_config(self):
-#         """安全的配置检查"""
-#         if self._reload_in_progress:
-#             logger.debug("重载操作正在进行中，跳过检查")
-#             return
-        
-#         if not os.path.exists(self.config_path):
-#             return
-        
-#         try:
-#             # 快速检查文件状态（非阻塞）
-#             current_mtime = os.path.getmtime(self.config_path)
-            
-#             # 使用属性存储状态，避免复杂初始化
-#             if not hasattr(self, '_last_mtime'):
-#                 self._last_mtime = current_mtime
-#                 return
-            
-#             # 只有当修改时间确实变化时才继续
-#             if current_mtime <= self._last_mtime:
-#                 return
-            
-#             # 标记重载进行中
-#             self._reload_in_progress = True
-            
-#             # 延迟读取文件内容，避免频繁IO
-#             await asyncio.sleep(1)  # 给文件系统时间完成写入
-            
-#             # 读取文件内容（在try中确保异常处理）
-#             with open(self.config_path, 'r', encoding='utf-8') as f:
-#                 current_content = f.read()
-            
-#             # 比较内容
-#             if not hasattr(self, '_last_content') or current_content != self._last_content:
-#                 logger.info("检测到配置变化，准备安全重载...")
-                
-#                 # 更新状态
-#                 self._last_mtime = current_mtime
-#                 self._last_content = current_content
-                
-#                 # 在重载前先停止当前监控
-#                 await self.stop()
-                
-#                 # 安全重载插件（带超时）
-#                 await self._safe_reload_plugin()
-#             else:
-#                 # 只更新时间戳
-#                 self._last_mtime = current_mtime
-                
-#         except Exception as e:
-#             logger.error(f"配置检查失败: {str(e)}")
-#         finally:
-#             # 确保标志被重置
-#             self._reload_in_progress = False
-    
-#     async def _safe_reload_plugin(self):
-#         """安全重载插件"""
-
-#         try:
-#             # 设置重载超时
-#             logger.info("开始安全重载插件...")
-            
-#             # 使用wait_for设置超时
-#             success = await asyncio.wait_for(
-#                 plugin_manage_api.reload_plugin(self.plugin.plugin_name),
-#                 timeout=30.0  # 30秒超时
-#             )
-            
-#             if success:
-#                 logger.info("插件安全重载成功")
-#             else:
-#                 logger.error("插件重载失败")
-                
-#         except asyncio.TimeoutError:
-#             logger.error("插件重载超时，可能卡死，已取消操作")
-#         except Exception as e:
-#             logger.error(f"重载插件时出错: {str(e)}")
-    
-#     def _get_config_path(self):
-#         """获取配置文件路径"""
-#         plugin_dir = getattr(self.plugin, 'plugin_directory', os.path.dirname(os.path.abspath(__file__)))
-#         return os.path.join(plugin_dir, "config.toml")
 
 class AsyncWatchdogHandler(FileSystemEventHandler):
     """异步安全的 Watchdog 处理器"""
