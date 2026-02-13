@@ -1,0 +1,215 @@
+# sky_tools_plugin - 配置文件
+# 光遇工具(sky_tools_plugin)
+# 配置版本: 2.0.2
+
+# ConfigSection(title='插件基本信息', description=None, icon='settings', collapsed=False, order=1)
+[plugin]
+
+# 是否启用插件
+enabled = true
+
+# 配置文件版本
+config_version = "2.0.2"
+
+# 命令前缀（注：修改命令前缀需要重启主程序才能更新，热重载无效）
+command_prefix = "#"
+
+
+# ConfigSection(title='Napcat 合并转发', description=None, icon='message-square', collapsed=False, order=2)
+[napcat]
+
+# Napcat API地址，默认: http://127.0.0.1:5222
+api_url = "http://127.0.0.1:5222"
+
+# Napcat API令牌（可选）
+token = ""
+
+# API请求超时时间（秒）
+timeout = 30
+
+# 是否启用合并转发消息功能
+enabled = true
+
+
+# ConfigSection(title='身高查询 API', description=None, icon='ruler', collapsed=False, order=3)
+[height_api]
+
+# 默认身高查询平台
+# 可选值: mango, ovoav, yingtian
+default_platform = "mango"
+
+# 平台别名配置，格式：主平台名:别名1,别名2,...
+platform_aliases = ["mango:芒果,mg", "ovoav:独角兽,djs", "yingtian:应天,yt"]
+
+# 是否启用芒果平台身高查询
+enable_mango = true
+
+# 是否启用独角兽平台身高查询
+enable_ovoav = true
+
+# 是否启用应天平台身高查询
+enable_yingtian = true
+
+# 芒果工具身高查询API地址
+mango_url = "https://api.mangotool.cn/sky/out/cn"
+
+# 芒果工具身高查询API密钥，获取方式：芒果工具：https://mangotool.cn/openAPI (必需)
+mango_key = "CtDvl4pyRkxgIcBBPhLyMfgo"
+
+# 独角兽平台身高查询API地址
+ovoav_url = "https://ovoav.com/api/sky/sgwz/sgv1"
+
+# 独角兽平台身高查询API密钥，获取方式：独角兽API：https://ovoav.com (必需)
+ovoav_key = "2IthfRopAQItQ"
+
+# 应天平台身高查询API地址
+yingtian_url = "https://api.t1qq.com/api/sky/sc/sg"
+
+# 应天平台身高查询API密钥，获取方式：应天API：https://api.t1qq.com (必需)
+yingtian_key = "2cfbEqGoql1JQRweZss07NQiA1"
+
+# 身高API请求超时时间（秒）
+timeout = 15
+
+
+# ConfigSection(title='每日任务图片', description=None, icon='image', collapsed=False, order=4)
+[task_api]
+
+# 任务图片API地址，应天API：https://api.t1qq.com/api/sky/sc/scrw，独角兽API：https://ovoav.com/api/sky/rwtp/rwt
+url = "https://ovoav.com/api/sky/rwtp/rwt"
+
+# 任务图片API密钥，获取方式：应天API：https://api.t1qq.com，独角兽API：https://ovoav.com (必需)
+key = "JRyVTr40As89c"
+
+# 任务API请求超时时间（秒）
+timeout = 15
+
+
+# ConfigSection(title='大蜡烛位置', description=None, icon='candle', collapsed=False, order=5)
+[candle_api]
+
+# 大蜡烛位置API地址，应天API：https://api.t1qq.com/api/sky/sc/scdl，独角兽API：https://ovoav.com/api/sky/dlzwz/dl
+url = "https://ovoav.com/api/sky/dlzwz/dl"
+
+# 大蜡烛位置API密钥，获取方式：应天API：https://api.t1qq.com，独角兽API：https://ovoav.com (必需)
+key = "JRyVTr40As89c"
+
+# 大蜡烛API请求超时时间（秒）
+timeout = 15
+
+
+# ConfigSection(title='复刻先祖', description=None, icon='users', collapsed=False, order=6)
+[ancestor_api]
+
+# 复刻先祖位置API地址，应天API：暂无，独角兽API：https://ovoav.com/api/sky/fkxz/xz
+url = "https://ovoav.com/api/sky/fkxz/xz"
+
+# 复刻先祖位置API密钥，获取方式：应天API：https://api.t1qq.com，独角兽API：https://ovoav.com (必需)
+key = "JRyVTr40As89c"
+
+# 复刻先祖API请求超时时间（秒）
+timeout = 15
+
+
+# ConfigSection(title='每日魔法', description=None, icon='wand', collapsed=False, order=7)
+[magic_api]
+
+# 每日魔法API地址，应天API：https://api.t1qq.com/api/sky/mf/magic，独角兽API：https://ovoav.com/api/sky/mftp/mf
+url = "https://ovoav.com/api/sky/mftp/mf"
+
+# 每日魔法API密钥，获取方式：应天API：https://api.t1qq.com，独角兽API：https://ovoav.com (必需)
+key = "JRyVTr40As89c"
+
+# 每日魔法API请求超时时间（秒）
+timeout = 15
+
+
+# ConfigSection(title='季节蜡烛', description=None, icon='flame', collapsed=False, order=8)
+[season_candle_api]
+
+# 每日季蜡位置API地址，应天API：https://api.t1qq.com/api/sky/sc/scjl，独角兽API：https://ovoav.com/api/sky/jlwz/jl
+url = "https://ovoav.com/api/sky/jlwz/jl"
+
+# 每日季蜡位置API密钥，获取方式：应天API：https://api.t1qq.com，独角兽API：https://ovoav.com (必需)
+key = "JRyVTr40As89c"
+
+# 季蜡API请求超时时间（秒）
+timeout = 15
+
+
+# ConfigSection(title='活动日历', description=None, icon='calendar', collapsed=False, order=9)
+[calendar_api]
+
+# 光遇日历API地址，应天API：暂无，独角兽API：https://ovoav.com/api/sky/rltp/rl
+url = "https://ovoav.com/api/sky/rltp/rl"
+
+# 光遇日历API密钥，获取方式：应天API：https://api.t1qq.com，独角兽API：https://ovoav.com (必需)
+key = "JRyVTr40As89c"
+
+# 日历API请求超时时间（秒）
+timeout = 15
+
+
+# ConfigSection(title='红石位置', description=None, icon='alert-circle', collapsed=False, order=10)
+[redstone_api]
+
+# 红石位置API地址，应天API：暂无，独角兽API：https://ovoav.com/api/sky/hstp/hs
+url = "https://ovoav.com/api/sky/hstp/hs"
+
+# 红石位置API密钥，获取方式：应天API：https://api.t1qq.com，独角兽API：https://ovoav.com (必需)
+key = "JRyVTr40As89c"
+
+# 红石API请求超时时间（秒）
+timeout = 15
+
+
+# ConfigSection(title='服务器状态', description=None, icon='server', collapsed=False, order=11)
+[skytest_api]
+
+# 服务器状态测试API地址
+url = "https://ovoav.com/api/sky/gyzt/zt"
+
+# 服务器状态测试API密钥，获取方式：独角兽API：https://ovoav.com (必需)
+key = "JRyVTr40As89c"
+
+# 服务器状态API请求超时时间（秒）
+timeout = 15
+
+
+# ConfigSection(title='功能开关', description=None, icon='toggle-left', collapsed=False, order=12)
+[settings]
+
+# 命令显示顺序（按此列表顺序显示，未在列表中的命令会自动追加到末尾）
+command_display_order = ["all", "height", "task", "candle", "season_candle", "ancestor", "magic", "calendar", "redstone", "skytest"]
+
+# 是否启用身高查询功能
+enable_height_query = true
+
+# 是否启用任务查询功能
+enable_task_query = true
+
+# 是否启用大蜡烛查询功能
+enable_candle_query = true
+
+# 是否启用复刻先祖查询功能
+enable_ancestor_query = true
+
+# 是否启用每日魔法查询功能
+enable_magic_query = true
+
+# 是否启用季蜡查询功能
+enable_season_candle_query = true
+
+# 是否启用日历查询功能
+enable_calendar_query = true
+
+# 是否启用红石查询功能
+enable_redstone_query = true
+
+# 是否启用服务器状态查询功能
+enable_skytest_query = true
+
+# 是否启用一键汇总查询功能
+enable_all_query = true
+
+

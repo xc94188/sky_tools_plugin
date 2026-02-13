@@ -1,0 +1,91 @@
+{
+  "manifest_version": 1,
+  "name": "光遇查询插件",
+  "version": "1.0.5",
+  "description": "光遇工具(sky_tools_plugin)",
+  "author": {
+    "name": "寻",
+    "url": "https://github.com/xc94188"
+  },
+  "license": "MIT",
+  "host_application": {
+    "min_version": "0.10.2"
+  },
+  "homepage_url": "https://github.com/xc94188",
+  "repository_url": "https://github.com/xc94188/sky_tools_plugin",
+  "keywords": [
+    "光遇",
+    "Sky",
+    "身高查询",
+    "任务查询",
+    "大蜡烛",
+    "复刻先祖",
+    "每日魔法"
+  ],
+  "categories": [
+    "Utility Tools"
+  ],
+  "default_locale": "zh-CN",
+  "plugin_info": {
+    "is_built_in": false,
+    "plugin_type": "general",
+    "components": [
+      {
+        "type": "command",
+        "name": "skytools",
+        "description": "帮助命令"
+      },
+      {
+        "type": "command",
+        "name": "height",
+        "description": "身高查询命令"
+      },
+      {
+        "type": "command",
+        "name": "task",
+        "description": "任务图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "candle",
+        "description": "大蜡烛位置图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "ancestor",
+        "description": "复刻先祖信息获取命令"
+      },
+      {
+        "type": "command",
+        "name": "magic",
+        "description": "每日魔法图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "season_candle",
+        "description": "每日季蜡位置图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "calendar",
+        "description": "光遇日历图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "redstone",
+        "description": "红石位置图片获取命令"
+      },
+      {
+        "type": "command",
+        "name": "skytest",
+        "description": "检测光遇服务器状态"
+      },
+      {
+        "type": "command",
+        "name": "all",
+        "description": "一次性获取所有日常信息"
+      }
+    ]
+  },
+  "id": "寻.sky_tools_plugin"
+}
