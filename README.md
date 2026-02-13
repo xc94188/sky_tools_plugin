@@ -119,6 +119,7 @@ command_display_order = ["all", "height", "task", "candle", ...]
 # 独立开关（可单独禁用某项功能）
 enable_height_query = true
 enable_task_query = true
+
 # ...
 ```
 
