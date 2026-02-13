@@ -145,8 +145,7 @@ enable_task_query = true
 - 独角兽平台：`ovoav`、`djs`、`独角兽`
 - 应天平台：`yingtian`、`yt`、`应天`
 
-> ⚠️ **首次查询必须提供好友码**，格式：`XXXX-XXXX-XXXX`  
-> 可在配置中自行增减别名
+> ⚠️ **首次查询必须提供好友码**，格式：`XXXX-XXXX-XXXX`  可在配置中自行增减别名
 
 ### 🖼️ 日常查询
 
