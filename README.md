@@ -1,4 +1,4 @@
-<div align='center' ><font size='70'>🌈 Sky Tools Plugin - 光遇工具插件</font></div>
+<div align='center' ><font size='1000'>🌈 Sky Tools Plugin - 光遇工具插件</font></div>
 
 ![版本](https://img.shields.io/badge/版本-1.0.4-blue)
 ![MaiBot](https://img.shields.io/badge/MaiBot-0.7%2B-orange)
