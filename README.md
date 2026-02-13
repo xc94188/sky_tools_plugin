@@ -113,16 +113,14 @@ api_url = "http://127.0.0.1:5222"
 enabled = true
 
 [settings]
-# 命令显示顺序（影响帮助列表功能显示顺序）
+# 命令显示顺序（影响 help 列表）
 command_display_order = ["all", "height", "task", "candle", ...]
 
 # 独立开关（可单独禁用某项功能）
 enable_height_query = true
 enable_task_query = true
-
 # ...
 ```
-
 ---
 
 ## 📋 命令列表
