@@ -43,8 +43,8 @@
 
 ### 前置要求
 
-- [MaiBot](https://github.com/MaiM-with-u/MaiBot) `v0.10.0` 或更高版本
 - Python `3.10+`
+- [MaiBot](https://github.com/MaiM-with-u/MaiBot) `v0.10.0` 或更高版本
 - [Napcat](https://napcat.napneko.icu/) 创建HTTP Server 5222端口 关闭CORS与Websocket
 
 ### 安装步骤
@@ -67,7 +67,7 @@ uv run python3 bot.py
 ```
 
 4. **编辑配置文件**  
-打开 `plugins/sky_tools_plugin/config.toml`，填入你的 API 密钥（详见[配置说明](#-配置说明)）
+打开 `plugins/sky_tools_plugin/config.toml`，填入你的 API 密钥
 
 ---
 
@@ -146,7 +146,7 @@ enable_task_query = true
 - 独角兽平台：`ovoav`、`djs`、`独角兽`
 - 应天平台：`yingtian`、`yt`、`应天`
 
-> ⚠️ **首次查询必须提供好友码**，格式：`XXXX-XXXX-XXXX`
+> ⚠️ **首次查询必须提供好友码**，格式：`XXXX-XXXX-XXXX`  
 > 可在配置中自行增减别名
 
 ### 🖼️ 日常查询
