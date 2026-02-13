@@ -1,4 +1,4 @@
-<h1 style="text-align: center;">🌈 Sky Tools Plugin - 光遇工具插件</h1>
+# 🌈 Sky Tools Plugin - 光遇工具插件
 
 ![版本](https://img.shields.io/badge/版本-1.0.4-blue)
 ![MaiBot](https://img.shields.io/badge/MaiBot-0.7%2B-orange)
