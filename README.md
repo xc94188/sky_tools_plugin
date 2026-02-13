@@ -1,4 +1,4 @@
-# 🌈 Sky Tools Plugin - 光遇工具插件#
+<center> 🌈 Sky Tools Plugin - 光遇工具插件</center>
 
 <div align="center">
 
