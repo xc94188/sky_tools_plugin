@@ -45,7 +45,7 @@
 
 - [MaiBot](https://github.com/MaiM-with-u/MaiBot) `v0.10.0` 或更高版本
 - Python `3.10+`
-- 可选：[Napcat](https://napcat.napneko.icu/)（合并转发需 HTTP 接口）
+- [Napcat](https://napcat.napneko.icu/) 创建HTTP Server 5222端口 关闭CORS与Websocket
 
 ### 安装步骤
 
