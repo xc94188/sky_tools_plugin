@@ -44,7 +44,7 @@
 ### 前置要求
 
 - Python `3.10+`
-- [MaiBot](https://github.com/MaiM-with-u/MaiBot) `v0.10.0` 或更高版本
+- [MaiBot](https://github.com/MaiM-with-u/MaiBot) `v0.10.2` 或更高版本
 - [Napcat](https://napcat.napneko.icu/) 创建HTTP Server 5222端口 关闭CORS与Websocket
 
 ### 安装步骤
