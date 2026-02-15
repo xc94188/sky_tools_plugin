@@ -1,7 +1,7 @@
 # 🌈 Sky Tools Plugin - 光遇工具插件
 
 ![版本](https://img.shields.io/badge/版本-1.0.4-blue)
-![MaiBot](https://img.shields.io/badge/MaiBot-0.7%2B-orange)
+![MaiBot](https://img.shields.io/badge/MaiBot-0.10.2%2B-orange)
 ![许可证](https://img.shields.io/badge/许可证-MIT-green)
 
 **为光遇玩家打造的一站式查询工具 —— 身高、任务、蜡烛、复刻、红石、日历…… 所有信息，触手可及**
